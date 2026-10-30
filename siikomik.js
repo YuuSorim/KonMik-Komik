@@ -170,3 +170,4 @@ async getChapterImages(chapterUrl) {
 
   return images;
 }
+};
