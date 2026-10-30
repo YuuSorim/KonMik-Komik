@@ -140,12 +140,9 @@ var KonmikExtension = {
     };
   },
 
+  
   async getChapterImages(chapterUrl) {
     const html = await fetchHtml(absoluteUrl(chapterUrl));
-
-    if (/Chapter terkunci|Silakan masuk terlebih dahulu/i.test(html)) {
-      throw new Error('Chapter ini terkunci. Silakan akses melalui Siikomik.');
-    }
 
     const images = [];
     const imageRegex = /<img\b[^>]*(?:data-src|data-lazy-src|src)=["']([^"']+)["'][^>]*>/gi;
