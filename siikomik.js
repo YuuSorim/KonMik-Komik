@@ -2,7 +2,7 @@
 // ID: ext_siikomik_id
 // NAME: Siikomik
 // TYPE: comic
-// VERSION: 1.0.1
+// VERSION: 1.0.2
 // COLOR: #7B61A8
 // ICON: https://siikomik.id/favicon.ico
 // REFERER: https://siikomik.id/
@@ -141,23 +141,32 @@ var KonmikExtension = {
   },
 
   
-  async getChapterImages(chapterUrl) {
-    const html = await fetchHtml(absoluteUrl(chapterUrl));
+  
+async getChapterImages(chapterUrl) {
+  const html = await fetchHtml(absoluteUrl(chapterUrl));
+  const images = [];
+  const regex = /<img\b[^>]*>/gi;
+  let match;
 
-    const images = [];
-    const imageRegex = /<img\b[^>]*(?:data-src|data-lazy-src|src)=["']([^"']+)["'][^>]*>/gi;
-    let match;
+  while ((match = regex.exec(html)) !== null) {
+    const tag = match[0];
 
-    while ((match = imageRegex.exec(html)) !== null) {
-      const imageUrl = absoluteUrl(match[1]);
+    const src =
+      tag.match(/\bdata-src=["']([^"']+)["']/i) ||
+      tag.match(/\bdata-lazy-src=["']([^"']+)["']/i) ||
+      tag.match(/\bdata-original=["']([^"']+)["']/i) ||
+      tag.match(/\bsrc=["']([^"']+)["']/i);
 
-      if (!imageUrl || imageUrl.startsWith('data:')) continue;
-      if (!/\.(jpg|jpeg|png|webp)(\?|$)/i.test(imageUrl)) continue;
-      if (images.includes(imageUrl)) continue;
+    if (!src) continue;
 
-      images.push(imageUrl);
-    }
+    const imageUrl = absoluteUrl(src[1]);
 
-    return images;
+    if (!imageUrl || imageUrl.startsWith('data:')) continue;
+    if (!/\.(jpg|jpeg|png|webp)(?:[?#]|$)/i.test(imageUrl)) continue;
+    if (images.includes(imageUrl)) continue;
+
+    images.push(imageUrl);
   }
-};
+
+  return images;
+}
