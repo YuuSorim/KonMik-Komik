@@ -2,7 +2,7 @@
 // ID: ext_siikomik_id
 // NAME: Siikomik
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.0.1
 // COLOR: #7B61A8
 // ICON: https://siikomik.id/favicon.ico
 // REFERER: https://siikomik.id/
