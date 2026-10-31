@@ -1,8 +1,7 @@
-
 // ID: ext_siikomik_id
 // NAME: Siikomik
 // TYPE: comic
-// VERSION: 1.0.4
+// VERSION: 1.0.5
 // COLOR: #7B61A8
 // ICON: https://siikomik.id/favicon.ico
 // REFERER: https://siikomik.id/
@@ -16,7 +15,7 @@ const headers = {
 
 async function fetchHtml(url) {
     const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error('HTTP ' + res.status + ' saat membuka ' + url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.text();
 }
 
@@ -31,7 +30,9 @@ function clean(text) {
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&nbsp;/g, ' ')
-        .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+        .replace(/&#(\d+);/g, function (_, n) {
+            return String.fromCharCode(Number(n));
+        })
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -39,28 +40,31 @@ function clean(text) {
 function absoluteUrl(url) {
     if (!url) return '';
     url = url.trim();
+
     if (url.startsWith('//')) return 'https:' + url;
     if (url.startsWith('/')) return BASE + url;
-    return url;
-}
 
-function getMatch(regex, html, fallback = '') {
-    const match = html.match(regex);
-    return match ? clean(match[1]) : fallback;
+    return url;
 }
 
 function getAttr(tag, attr) {
     const regex = new RegExp(
-        '\\b' + attr + '\\s*=\\s*["\\']([^"\\']+)["\\']',
+        '\\b' + attr + '\\s*=\\s*["\\']([^"\\']*)["\\']',
         'i'
     );
     const match = tag.match(regex);
     return match ? match[1] : '';
 }
 
+function getMatch(regex, html, fallback) {
+    const match = html.match(regex);
+    return match ? clean(match[1]) : (fallback || '');
+}
+
 function extractAll(regex, html) {
     const matches = [];
     let match;
+
     regex.lastIndex = 0;
 
     while ((match = regex.exec(html)) !== null) {
@@ -75,7 +79,28 @@ function getImageFromTag(tag) {
     return getAttr(tag, 'data-src') ||
         getAttr(tag, 'data-lazy-src') ||
         getAttr(tag, 'data-original') ||
+        getAttr(tag, 'data-url') ||
         getAttr(tag, 'src');
+}
+
+function getTitleFromAnchor(anchorHtml) {
+    const imgTag = (anchorHtml.match(/<img\b[^>]*>/i) || [])[0] || '';
+
+    let title = getAttr(imgTag, 'alt') ||
+        getAttr(imgTag, 'title');
+
+    if (!title) {
+        title = getMatch(
+            /<[^>]*class=["'][^"']*(?:title|name)[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i,
+            anchorHtml
+        );
+    }
+
+    if (!title) {
+        title = clean(anchorHtml);
+    }
+
+    return clean(title);
 }
 
 var KonmikExtension = {
@@ -83,9 +108,13 @@ var KonmikExtension = {
         page = Math.max(1, Number(page) || 1);
 
         let url;
+
         if (query && query.trim()) {
             url = BASE + '/?s=' + encodeURIComponent(query.trim());
-            if (page > 1) url += '&paged=' + page;
+
+            if (page > 1) {
+                url += '&paged=' + page;
+            }
         } else {
             url = page === 1
                 ? BASE + '/'
@@ -96,30 +125,28 @@ var KonmikExtension = {
         const mangaList = [];
         const seen = new Set();
 
-        // Ambil tautan komik dari halaman situs
-        const anchorRegex = /<a\b[^>]*href=["']([^"']*\/komik\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+        const anchorRegex =
+            /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
         const anchors = extractAll(anchorRegex, html);
 
         for (const match of anchors) {
             const link = absoluteUrl(match[1]);
-            const inside = match[2];
 
-            // Hanya halaman utama komik, bukan chapter
+            // Hanya halaman komik, bukan chapter atau kategori
             if (!/\/komik\/[^/?#]+\/?$/i.test(link)) continue;
+
             if (seen.has(link)) continue;
 
+            const inside = match[2];
             const imgTag = (inside.match(/<img\b[^>]*>/i) || [])[0] || '';
             const cover = absoluteUrl(getImageFromTag(imgTag));
+            const title = getTitleFromAnchor(inside);
 
-            let title = getAttr(imgTag, 'alt') ||
-                getAttr(imgTag, 'title') ||
-                getMatch(/<[^>]*class=["'][^"']*title[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i, inside) ||
-                clean(inside);
-
-            title = clean(title);
             if (!title) continue;
 
             seen.add(link);
+
             mangaList.push({
                 id: link,
                 title: title,
@@ -136,50 +163,90 @@ var KonmikExtension = {
         const url = absoluteUrl(urlPath);
         const html = await fetchHtml(url);
 
-        const title =
+        let title =
             getMatch(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i, html) ||
-            getMatch(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)/i, html, 'Siikomik');
+            getMatch(
+                /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i,
+                html
+            );
 
         let cover =
-            getMatch(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)/i, html) ||
-            getMatch(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i, html) ||
-            getMatch(/<img[^>]+class=["'][^"']*wp-post-image[^"']*["'][^>]+src=["']([^"']+)/i, html);
+            getMatch(
+                /<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i,
+                html
+            ) ||
+            getMatch(
+                /<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i,
+                html
+            );
+
+        if (!cover) {
+            const imageMatch = html.match(/<img\b[^>]*class=["'][^"']*wp-post-image[^"']*["'][^>]*>/i);
+            if (imageMatch) {
+                cover = getImageFromTag(imageMatch[0]);
+            }
+        }
 
         cover = absoluteUrl(cover);
 
-        const description =
-            getMatch(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)/i, html) ||
-            getMatch(/<div[^>]*class=["'][^"']*entry-content[^"']*["'][\s\S]*?<p>([\s\S]*?)<\/p>/i, html) ||
-            'Tidak ada deskripsi.';
+        let description =
+            getMatch(
+                /<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i,
+                html
+            );
+
+        if (!description) {
+            description = getMatch(
+                /<div[^>]*class=["'][^"']*entry-content[^"']*["'][\s\S]*?<p>([\s\S]*?)<\/p>/i,
+                html
+            );
+        }
+
+        if (!description) {
+            description = 'Tidak ada deskripsi.';
+        }
 
         const genres = [];
-        const genreRegex = /<a\b[^>]*href=["'][^"']*\/genre\/[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+        const genreRegex =
+            /<a\b[^>]*href=["'][^"']*\/genre\/[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+
         const genreMatches = extractAll(genreRegex, html);
 
         for (const match of genreMatches) {
             const genre = clean(match[1]);
-            if (genre && !genres.includes(genre)) genres.push(genre);
+            if (genre && !genres.includes(genre)) {
+                genres.push(genre);
+            }
         }
 
-        // Ambil semua chapter yang tersedia pada halaman detail
-        const chapterRegex = /<a\b([^>]*href=["']([^"']*\/chapter-[^"']+)["'][^>]*)>([\s\S]*?)<\/a>/gi;
-        const chapterMatches = extractAll(chapterRegex, html);
         const chapters = [];
         const seenChapters = new Set();
 
+        // Ambil link chapter dari halaman detail
+        const chapterAnchorRegex =
+            /<a\b([^>]*href=["']([^"']+)["'][^>]*)>([\s\S]*?)<\/a>/gi;
+
+        const chapterMatches = extractAll(chapterAnchorRegex, html);
+
         for (const match of chapterMatches) {
             const attrs = match[1];
-            const chapterUrl = absoluteUrl(match[2]);
+            const rawChapterUrl = match[2];
             const inside = match[3];
 
+            const chapterUrl = absoluteUrl(rawChapterUrl);
+
+            if (!/\/chapter[-/][^/?#]+/i.test(chapterUrl)) continue;
             if (seenChapters.has(chapterUrl)) continue;
-            seenChapters.add(chapterUrl);
 
             let chapterTitle = clean(inside);
+
             if (!chapterTitle) {
-                chapterTitle = getAttr(attrs, 'title');
+                chapterTitle = clean(getAttr(attrs, 'title'));
             }
+
             if (!chapterTitle) continue;
+
+            seenChapters.add(chapterUrl);
 
             const date = getMatch(
                 /<[^>]*class=["'][^"']*date[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i,
@@ -190,12 +257,12 @@ var KonmikExtension = {
             chapters.push({
                 id: chapterUrl,
                 title: chapterTitle,
-                date: date
+                date: date || '-'
             });
         }
 
         return {
-            title: title,
+            title: title || 'Siikomik',
             cover_url: cover,
             description: description,
             rating: '-',
@@ -208,25 +275,31 @@ var KonmikExtension = {
     },
 
     async getChapterImages(chapterUrl) {
-        const html = await fetchHtml(absoluteUrl(chapterUrl));
+        const url = absoluteUrl(chapterUrl);
+        const html = await fetchHtml(url);
+
         const images = [];
         const seen = new Set();
 
-        // Cari gambar halaman chapter
+        // Cari gambar chapter dari berbagai atribut lazy-load
         const imgRegex = /<img\b[^>]*>/gi;
         const imgTags = extractAll(imgRegex, html);
 
         for (const match of imgTags) {
             const tag = match[0];
             const src = getImageFromTag(tag);
+
             if (!src) continue;
 
             const imageUrl = absoluteUrl(src);
 
             if (!imageUrl || imageUrl.startsWith('data:')) continue;
-            if (!/\.(jpg|jpeg|png|webp|avif)(?:[?#]|$)/i.test(imageUrl)) continue;
+            if (!/^https?:\/\//i.test(imageUrl)) continue;
 
-            // Lewati logo, avatar, dan gambar kecil yang bukan halaman komik
+            if (!/\.(jpg|jpeg|png|webp|avif|gif)(?:[?#]|$)/i.test(imageUrl)) {
+                continue;
+            }
+
             if (/favicon|logo|avatar|icon/i.test(imageUrl)) continue;
             if (seen.has(imageUrl)) continue;
 
@@ -234,8 +307,25 @@ var KonmikExtension = {
             images.push(imageUrl);
         }
 
+        // Cadangan: cari URL gambar di atribut data-url
         if (images.length === 0) {
-            throw new Error('Gambar chapter tidak ditemukan. Struktur halaman mungkin berubah.');
+            const dataUrlRegex = /data-url=["']([^"']+)["']/gi;
+            const dataUrlMatches = extractAll(dataUrlRegex, html);
+
+            for (const match of dataUrlMatches) {
+                const imageUrl = absoluteUrl(match[1]);
+
+                if (!imageUrl || imageUrl.startsWith('data:')) continue;
+                if (!/^https?:\/\//i.test(imageUrl)) continue;
+                if (seen.has(imageUrl)) continue;
+
+                seen.add(imageUrl);
+                images.push(imageUrl);
+            }
+        }
+
+        if (images.length === 0) {
+            throw new Error('Gambar chapter tidak ditemukan.');
         }
 
         return images;
