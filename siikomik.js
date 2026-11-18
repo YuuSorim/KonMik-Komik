@@ -35,7 +35,6 @@ function extractNextData(html) {
 var KonmikExtension = {
     // 1. Ambil Daftar Komik (SUDAH DIPERBAIKI)
     async getList(page, query, filters) {
-    async getList(page, query, filters) {
         // Jika ada query, ambil dari halaman pencarian.
         // Jika tidak, ambil dari halaman katalog utama.
         let url = query 
