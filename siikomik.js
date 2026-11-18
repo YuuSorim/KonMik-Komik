@@ -33,7 +33,7 @@ function extractNextData(html) {
 }
 
 var KonmikExtension = {
-    // 1. Ambil Daftar Komik
+    // 1. Ambil Daftar Komik (SUDAH DIPERBAIKI)
     async getList(page, query, filters) {
         let url = query 
             ? `${BASE}/cari/?q=${encodeURIComponent(query)}` 
@@ -41,30 +41,43 @@ var KonmikExtension = {
             
         const html = await fetchHtml(url);
         const mangaList = [];
-        const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>[\s\S]*?<img[^>]+(?:src|data-src)="([^"]+)"[^>]*alt="([^"]*)"[\s\S]*?<\/a>/gi;
+        
+        // Regex baru untuk menangkap kotak komik secara utuh
+        // Mencari tag <a> yang menuju ke /komik/, lalu mengambil gambar (src/data-src) dan judul (alt atau tag h3)
+        const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
         let m;
         const seen = new Set();
         
         while ((m = cardRegex.exec(html)) !== null) {
             const path = m[1];
-            const cover = m[2];
-            const title = m[3];
+            const innerHtml = m[2];
             
-            if (path.includes('/chapter-') || seen.has(path)) continue;
-            seen.add(path);
+            // Abaikan jika ini link chapter atau link navigasi
+            if (path.includes('/chapter-') || path.includes('/genre/') || seen.has(path)) continue;
             
-            mangaList.push({
-                id: path,
-                title: title.trim() || path.split('/').filter(Boolean).pop().replace(/-/g, ' '),
-                cover_url: cover,
-                latest_chapter: '',
-                rating: '-',
-                views: '-'
-            });
+            // Cari gambar di dalam kotak tersebut (bisa pakai src atau data-src)
+            const imgMatch = innerHtml.match(/(?:src|data-src)="([^"]+)"/i);
+            // Cari judul (biasanya di atribut alt, atau di tag <h3>, atau di class title)
+            let titleMatch = innerHtml.match(/alt="([^"]+)"/i) || innerHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i) || innerHtml.match(/class="[^"]*title[^"]*"[^>]*>([^<]+)</i);
+            
+            if (imgMatch) {
+                seen.add(path);
+                let cover = imgMatch[1].replace(/&amp;/g, '&'); // Bersihkan URL
+                let title = titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' ');
+                
+                mangaList.push({
+                    id: path,
+                    title: title,
+                    cover_url: cover,
+                    latest_chapter: '',
+                    rating: '-',
+                    views: '-'
+                });
+            }
         }
+        
         return { manga_list: mangaList };
     },
-
     // 2. Ambil Detail Komik
     async getDetail(slug) {
         let url = slug;
