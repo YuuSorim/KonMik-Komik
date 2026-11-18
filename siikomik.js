@@ -34,12 +34,12 @@ function extractNextData(html) {
 
 var KonmikExtension = {
     // 1. Ambil Daftar Komik (SUDAH DIPERBAIKI)
-    async getList(page, query, filters) {
+        async getList(page, query, filters) {
         // Jika ada query, ambil dari halaman pencarian.
-        // Jika tidak, ambil dari halaman katalog utama.
+        // Jika tidak, ambil dari halaman genre Romance.
         let url = query 
             ? `${BASE}/cari/?q=${encodeURIComponent(query)}` 
-            : `${BASE}/komik/`;
+            : `${BASE}/komik/?genre=romance`; // <-- Coba ambil dari genre Romance
             
         const html = await fetchHtml(url);
         const mangaList = [];
