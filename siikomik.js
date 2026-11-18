@@ -1,7 +1,7 @@
 // ID: ext_siikomik
 // NAME: Siikomik
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.0.1
 // COLOR: #ff4757
 // ICON: https://www.google.com/s2/favicons?domain=siikomik.com&sz=64
 // REFERER: https://siikomik.com/
@@ -9,7 +9,9 @@
 const BASE = 'https://siikomik.com';
 const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-    'Referer': BASE + '/',
+    'Referer': 'https://siikomik.com/',
+    'Origin': 'https://siikomik.com',
+    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
 };
 
 async function fetchHtml(url) {
@@ -18,13 +20,10 @@ async function fetchHtml(url) {
     return await res.text();
 }
 
-// Fungsi bantuan untuk mengekstrak JSON dari Next.js
 function extractNextData(html) {
     const scriptRegex = /<script>self\.__next_f\.push\(\[1,"([\s\S]*?)"\]\)<\/script>/g;
     let match;
     let fullText = "";
-    
-    // Gabungkan semua script Next.js
     while ((match = scriptRegex.exec(html)) !== null) {
         let content = match[1];
         content = content.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
@@ -34,22 +33,14 @@ function extractNextData(html) {
 }
 
 var KonmikExtension = {
-    // 1. Ambil Daftar Komik (Katalog/Pencarian)
+    // 1. Ambil Daftar Komik
     async getList(page, query, filters) {
-        // Karena halaman katalog siikomik cukup kompleks (menggunakan CSR/Client Side Rendering),
-        // kita bisa memanfaatkan halaman pencarian mereka.
         let url = query 
             ? `${BASE}/cari/?q=${encodeURIComponent(query)}` 
-            : `${BASE}/komik/`; // Halaman default komik
+            : `${BASE}/komik/`;
             
-        // Catatan: Siikomik mungkin melakukan paginasi di halaman katalog, 
-        // tapi untuk pencarian biasanya 1 halaman sudah cukup.
-        
         const html = await fetchHtml(url);
         const mangaList = [];
-        
-        // Ekstraksi menggunakan Regex pada tag <a> dan <img>
-        // (Karena halaman pencarian mungkin tidak memiliki JSON initialData yang rapi)
         const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>[\s\S]*?<img[^>]+(?:src|data-src)="([^"]+)"[^>]*alt="([^"]*)"[\s\S]*?<\/a>/gi;
         let m;
         const seen = new Set();
@@ -59,7 +50,6 @@ var KonmikExtension = {
             const cover = m[2];
             const title = m[3];
             
-            // Filter agar tidak menangkap link chapter
             if (path.includes('/chapter-') || seen.has(path)) continue;
             seen.add(path);
             
@@ -72,13 +62,11 @@ var KonmikExtension = {
                 views: '-'
             });
         }
-        
         return { manga_list: mangaList };
     },
 
     // 2. Ambil Detail Komik
     async getDetail(slug) {
-        // Pastikan slug dalam bentuk URL penuh atau path relatif
         let url = slug;
         if (!url.startsWith('http')) {
             url = slug.startsWith('/') ? BASE + slug : BASE + '/komik/' + slug + '/';
@@ -87,9 +75,6 @@ var KonmikExtension = {
         const html = await fetchHtml(url);
         const nextDataStr = extractNextData(html);
 
-        // Ekstrak data JSON "initialChapters" dan "series" menggunakan manipulasi string
-        // (Karena JSON-nya bisa sangat panjang, kita cari posisi indeksnya)
-        
         let title = "";
         let cover = "";
         let description = "";
@@ -99,34 +84,27 @@ var KonmikExtension = {
         let genres = [];
         let chapters = [];
 
-        // 1. Ambil Judul
         const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
         if (titleMatch) title = titleMatch[1].trim();
 
-        // 2. Ambil Cover
         const coverMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
-        if (coverMatch) cover = coverMatch[1];
+        if (coverMatch) cover = coverMatch[1].replace(/&amp;/g, '&');
 
-        // 3. Ambil Deskripsi/Sinopsis
         const descMatch = html.match(/<div class="prose-sk[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
         if (descMatch) {
             description = descMatch[1].replace(/<[^>]+>/g, '\n').replace(/\n+/g, '\n').trim();
         }
 
-        // 4. Ambil Data JSON (Chapters, Rating, Views)
         if (nextDataStr) {
-            // Ambil Rating
             const ratingMatch = nextDataStr.match(/"initialAvg":([\d.]+)/);
             if (ratingMatch) rating = ratingMatch[1];
 
-            // Ambil Views
             const viewsMatch = nextDataStr.match(/"initialViews":(\d+)/);
             if (viewsMatch) {
                 const v = parseInt(viewsMatch[1]);
                 views = v > 1000 ? (v/1000).toFixed(1) + 'K' : v.toString();
             }
             
-            // Ambil Genres
             const genreMatch = nextDataStr.match(/"genres":\[(.*?)\]/);
             if (genreMatch) {
                 const gStr = genreMatch[1];
@@ -136,11 +114,9 @@ var KonmikExtension = {
                 }
             }
 
-            // Ambil Chapters (mencari string "initialChapters":[...])
             const chIndex = nextDataStr.indexOf('"initialChapters":');
             if (chIndex !== -1) {
                 const startIdx = nextDataStr.indexOf('[', chIndex);
-                // Cari penutup array yang seimbang
                 let bracketCount = 0;
                 let endIdx = -1;
                 for (let i = startIdx; i < nextDataStr.length; i++) {
@@ -156,21 +132,17 @@ var KonmikExtension = {
                     let chJsonStr = nextDataStr.substring(startIdx, endIdx + 1);
                     try {
                         const chArr = JSON.parse(chJsonStr);
-                        // Urutkan dari Chapter 1 (terkecil ke terbesar)
                         chapters = chArr.sort((a, b) => a.number - b.number).map(ch => ({
                             id: `/komik/${slug.replace(/^\/komik\/|\/$/g, '')}/${ch.slug}/`,
                             title: ch.name,
                             endpoint: `/komik/${slug.replace(/^\/komik\/|\/$/g, '')}/${ch.slug}/`,
                             date: new Date(ch.publishedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
                         }));
-                    } catch(e) {
-                        // Fallback jika JSON.parse gagal
-                    }
+                    } catch(e) {}
                 }
             }
         }
 
-        // Fallback: Jika JSON gagal, ekstrak manual daftar chapter dari <noscript>
         if (chapters.length === 0) {
             const noscriptMatch = html.match(/<noscript>([\s\S]*?)<\/noscript>/i);
             if (noscriptMatch) {
@@ -184,7 +156,7 @@ var KonmikExtension = {
                         date: ''
                     });
                 }
-                chapters.reverse(); // Urutkan dari awal
+                chapters.reverse();
             }
         }
 
@@ -201,7 +173,7 @@ var KonmikExtension = {
         };
     },
 
-    // 3. Ambil Gambar Chapter
+    // 3. Ambil Gambar Chapter (SUDAH DIPERBAIKI)
     async getChapterImages(endpoint) {
         const url = endpoint.startsWith('http') ? endpoint : BASE + endpoint;
         const html = await fetchHtml(url);
@@ -210,33 +182,37 @@ var KonmikExtension = {
         let images = [];
 
         if (nextDataStr) {
-            // Cari "initialPages"
             const pagesIndex = nextDataStr.indexOf('"initialPages":');
             if (pagesIndex !== -1) {
                 const startIdx = nextDataStr.indexOf('{', pagesIndex);
-                // Cari penutup JSON (kita tahu formatnya diakhiri dengan "status":"FREE"})
                 const endIdx = nextDataStr.indexOf('"status":"FREE"', startIdx);
-                if (startIdx !== -1 && endIdx !== -1) {
-                    const jsonStr = nextDataStr.substring(startIdx, endIdx + 15) + '}';
+                
+                // Kadang statusnya bukan "FREE" (misal "LOCKED"), jadi kita pakai pencarian mundur
+                let finalEndIdx = endIdx !== -1 ? endIdx + 15 : nextDataStr.indexOf('}', startIdx);
+                
+                if (startIdx !== -1 && finalEndIdx !== -1) {
+                    let jsonStr = nextDataStr.substring(startIdx, finalEndIdx);
+                    if (!jsonStr.endsWith('}')) jsonStr += '}';
+                    
                     try {
                         const pagesData = JSON.parse(jsonStr);
                         if (pagesData && pagesData.pages) {
-                            images = pagesData.pages.map(p => p.url);
+                            // PERBAIKAN 1: Ubah &amp; menjadi & agar URL gambar tidak rusak
+                            images = pagesData.pages.map(p => p.url.replace(/&amp;/g, '&'));
                         }
-                    } catch (e) {
-                        // Abaikan
-                    }
+                    } catch (e) {}
                 }
             }
         }
 
-        // Fallback: Regex gambar langsung dari tag <img> jika JSON gagal
         if (images.length === 0) {
             const imgRegex = /<img[^>]+src="(https:\/\/siikomik\.com\/api\/media\/[^"]+)"[^>]*>/gi;
             let m;
             while ((m = imgRegex.exec(html)) !== null) {
-                if (!images.includes(m[1])) {
-                    images.push(m[1]);
+                // PERBAIKAN 2: Bersihkan URL dari &amp;
+                const cleanUrl = m[1].replace(/&amp;/g, '&');
+                if (!images.includes(cleanUrl)) {
+                    images.push(cleanUrl);
                 }
             }
         }
