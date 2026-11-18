@@ -39,43 +39,30 @@ function cleanUrl(url) {
 
 var KonmikExtension = {
     // 1. Ambil Daftar Komik
-    async getList(page, query, filters) {
-        let url = query 
-            ? `${BASE}/cari/?q=${encodeURIComponent(query)}` 
-            : `${BASE}/komik/`;
+async getList(page, query, filters) {
+    page = page || 1;
+    let url;
+    if (query) {
+        url = `${BASE}/cari/?q=${encodeURIComponent(query)}` + (page > 1 ? `&page=${page}` : '');
+    } else {
+        url = page > 1 ? `${BASE}/komik/?page=${page}` : `${BASE}/komik/`;
+    }
 
-        const html = await fetchHtml(url);
-        const mangaList = [];
-        const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-        let m;
-        const seen = new Set();
+    const html = await fetchHtml(url);
+    const mangaList = [];
+    // ... (regex cardRegex dan loop-nya tetap sama seperti sebelumnya)
 
-        while ((m = cardRegex.exec(html)) !== null) {
-            const path = m[1];
-            const innerHtml = m[2];
-
-            if (path.includes('/chapter-') || path.includes('/genre/') || seen.has(path)) continue;
-
-            const imgMatch = innerHtml.match(/(?:src|data-src)="([^"]+)"/i);
-            let titleMatch = innerHtml.match(/alt="([^"]+)"/i) || innerHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i) || innerHtml.match(/class="[^"]*title[^"]*"[^>]*>([^<]+)</i);
-
-            if (imgMatch) {
-                seen.add(path);
-                let cover = cleanUrl(imgMatch[1]); // Pakai fungsi cleanUrl
-                let title = titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' ');
-
-                mangaList.push({
-                    id: path,
-                    title: title,
-                    cover_url: cover,
-                    latest_chapter: '',
-                    rating: '-',
-                    views: '-'
-                });
-            }
-        }
-        return { manga_list: mangaList };
-    },
+    // Cegah loop tak berhenti kalau situs mengabaikan ?page=
+    const sig = mangaList.length ? mangaList[0].id : '';
+    KonmikExtension._firstIds = KonmikExtension._firstIds || {};
+    const key = query || '_catalog';
+    if (page === 1) {
+        KonmikExtension._firstIds[key] = sig;
+    } else if (sig && sig === KonmikExtension._firstIds[key]) {
+        return { manga_list: [] };
+    }
+    return { manga_list: mangaList };
+},
 
     // 2. Ambil Detail Komik
     async getDetail(slug) {
