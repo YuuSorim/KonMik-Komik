@@ -41,6 +41,7 @@ var KonmikExtension = {
     // 1. Ambil Daftar Komik
 async getList(page, query, filters) {
     page = page || 1;
+
     let url;
     if (query) {
         url = `${BASE}/cari/?q=${encodeURIComponent(query)}` + (page > 1 ? `&page=${page}` : '');
@@ -50,17 +51,42 @@ async getList(page, query, filters) {
 
     const html = await fetchHtml(url);
     const mangaList = [];
-    // ... (regex cardRegex dan loop-nya tetap sama seperti sebelumnya)
+    const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    const seen = new Set();
 
-    // Cegah loop tak berhenti kalau situs mengabaikan ?page=
-    const sig = mangaList.length ? mangaList[0].id : '';
-    KonmikExtension._firstIds = KonmikExtension._firstIds || {};
+    while ((m = cardRegex.exec(html)) !== null) {
+        const path = m[1];
+        const innerHtml = m[2];
+
+        if (path.includes('/chapter-') || path.includes('/genre/') || seen.has(path)) continue;
+
+        const imgMatch = innerHtml.match(/(?:src|data-src)="([^"]+)"/i);
+        let titleMatch = innerHtml.match(/alt="([^"]+)"/i) || innerHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i) || innerHtml.match(/class="[^"]*title[^"]*"[^>]*>([^<]+)</i);
+
+        if (imgMatch) {
+            seen.add(path);
+            mangaList.push({
+                id: path,
+                title: titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' '),
+                cover_url: cleanUrl(imgMatch[1]),
+                latest_chapter: '',
+                rating: '-',
+                views: '-'
+            });
+        }
+    }
+
+    // Pengaman: kalau situs mengabaikan ?page= dan mengembalikan halaman yang sama, berhenti.
+    this._firstIds = this._firstIds || {};
     const key = query || '_catalog';
+    const sig = mangaList.length ? mangaList[0].id : '';
     if (page === 1) {
-        KonmikExtension._firstIds[key] = sig;
-    } else if (sig && sig === KonmikExtension._firstIds[key]) {
+        this._firstIds[key] = sig;
+    } else if (!sig || sig === this._firstIds[key]) {
         return { manga_list: [] };
     }
+
     return { manga_list: mangaList };
 },
 
