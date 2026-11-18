@@ -33,35 +33,33 @@ function extractNextData(html) {
 }
 
 var KonmikExtension = {
-    // 1. Ambil Daftar Komik (SUDAH DIPERBAIKI)
-        async getList(page, query, filters) {
-        // Jika ada query, ambil dari halaman pencarian.
-        // Jika tidak, ambil dari halaman genre Romance.
+    // 1. Ambil Daftar Komik
+    async getList(page, query, filters) {
         let url = query 
             ? `${BASE}/cari/?q=${encodeURIComponent(query)}` 
-            : `${BASE}/komik/?genre=romance`; // <-- Coba ambil dari genre Romance
-            
+            : `${BASE}/komik/`;
+
         const html = await fetchHtml(url);
         const mangaList = [];
-        
+
         const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
         let m;
         const seen = new Set();
-        
+
         while ((m = cardRegex.exec(html)) !== null) {
             const path = m[1];
             const innerHtml = m[2];
-            
+
             if (path.includes('/chapter-') || path.includes('/genre/') || seen.has(path)) continue;
-            
+
             const imgMatch = innerHtml.match(/(?:src|data-src)="([^"]+)"/i);
             let titleMatch = innerHtml.match(/alt="([^"]+)"/i) || innerHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i) || innerHtml.match(/class="[^"]*title[^"]*"[^>]*>([^<]+)</i);
-            
+
             if (imgMatch) {
                 seen.add(path);
-                let cover = imgMatch[1].replace(/&amp;/g, '&');
+                let cover = imgMatch[1].replace(/&amp;/g, '&'); // PERBAIKAN
                 let title = titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' ');
-                
+
                 mangaList.push({
                     id: path,
                     title: title,
@@ -72,9 +70,10 @@ var KonmikExtension = {
                 });
             }
         }
-        
+
         return { manga_list: mangaList };
     },
+
     // 2. Ambil Detail Komik
     async getDetail(slug) {
         let url = slug;
@@ -98,7 +97,7 @@ var KonmikExtension = {
         if (titleMatch) title = titleMatch[1].trim();
 
         const coverMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
-        if (coverMatch) cover = coverMatch[1].replace(/&amp;/g, '&');
+        if (coverMatch) cover = coverMatch[1].replace(/&amp;/g, '&'); // PERBAIKAN
 
         const descMatch = html.match(/<div class="prose-sk[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
         if (descMatch) {
@@ -114,7 +113,7 @@ var KonmikExtension = {
                 const v = parseInt(viewsMatch[1]);
                 views = v > 1000 ? (v/1000).toFixed(1) + 'K' : v.toString();
             }
-            
+
             const genreMatch = nextDataStr.match(/"genres":\[(.*?)\]/);
             if (genreMatch) {
                 const gStr = genreMatch[1];
@@ -137,7 +136,7 @@ var KonmikExtension = {
                         break;
                     }
                 }
-                
+
                 if (endIdx !== -1) {
                     let chJsonStr = nextDataStr.substring(startIdx, endIdx + 1);
                     try {
@@ -183,7 +182,7 @@ var KonmikExtension = {
         };
     },
 
-    // 3. Ambil Gambar Chapter (SUDAH DIPERBAIKI)
+    // 3. Ambil Gambar Chapter
     async getChapterImages(endpoint) {
         const url = endpoint.startsWith('http') ? endpoint : BASE + endpoint;
         const html = await fetchHtml(url);
@@ -196,19 +195,17 @@ var KonmikExtension = {
             if (pagesIndex !== -1) {
                 const startIdx = nextDataStr.indexOf('{', pagesIndex);
                 const endIdx = nextDataStr.indexOf('"status":"FREE"', startIdx);
-                
-                // Kadang statusnya bukan "FREE" (misal "LOCKED"), jadi kita pakai pencarian mundur
+
                 let finalEndIdx = endIdx !== -1 ? endIdx + 15 : nextDataStr.indexOf('}', startIdx);
-                
+
                 if (startIdx !== -1 && finalEndIdx !== -1) {
                     let jsonStr = nextDataStr.substring(startIdx, finalEndIdx);
                     if (!jsonStr.endsWith('}')) jsonStr += '}';
-                    
+
                     try {
                         const pagesData = JSON.parse(jsonStr);
                         if (pagesData && pagesData.pages) {
-                            // PERBAIKAN 1: Ubah &amp; menjadi & agar URL gambar tidak rusak
-                            images = pagesData.pages.map(p => p.url.replace(/&amp;/g, '&'));
+                            images = pagesData.pages.map(p => p.url.replace(/&amp;/g, '&')); // PERBAIKAN
                         }
                     } catch (e) {}
                 }
@@ -219,8 +216,7 @@ var KonmikExtension = {
             const imgRegex = /<img[^>]+src="(https:\/\/siikomik\.com\/api\/media\/[^"]+)"[^>]*>/gi;
             let m;
             while ((m = imgRegex.exec(html)) !== null) {
-                // PERBAIKAN 2: Bersihkan URL dari &amp;
-                const cleanUrl = m[1].replace(/&amp;/g, '&');
+                const cleanUrl = m[1].replace(/&amp;/g, '&'); // PERBAIKAN
                 if (!images.includes(cleanUrl)) {
                     images.push(cleanUrl);
                 }
