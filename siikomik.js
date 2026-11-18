@@ -35,6 +35,9 @@ function extractNextData(html) {
 var KonmikExtension = {
     // 1. Ambil Daftar Komik (SUDAH DIPERBAIKI)
     async getList(page, query, filters) {
+    async getList(page, query, filters) {
+        // Jika ada query, ambil dari halaman pencarian.
+        // Jika tidak, ambil dari halaman katalog utama.
         let url = query 
             ? `${BASE}/cari/?q=${encodeURIComponent(query)}` 
             : `${BASE}/komik/`;
@@ -42,8 +45,6 @@ var KonmikExtension = {
         const html = await fetchHtml(url);
         const mangaList = [];
         
-        // Regex baru untuk menangkap kotak komik secara utuh
-        // Mencari tag <a> yang menuju ke /komik/, lalu mengambil gambar (src/data-src) dan judul (alt atau tag h3)
         const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
         let m;
         const seen = new Set();
@@ -52,17 +53,14 @@ var KonmikExtension = {
             const path = m[1];
             const innerHtml = m[2];
             
-            // Abaikan jika ini link chapter atau link navigasi
             if (path.includes('/chapter-') || path.includes('/genre/') || seen.has(path)) continue;
             
-            // Cari gambar di dalam kotak tersebut (bisa pakai src atau data-src)
             const imgMatch = innerHtml.match(/(?:src|data-src)="([^"]+)"/i);
-            // Cari judul (biasanya di atribut alt, atau di tag <h3>, atau di class title)
             let titleMatch = innerHtml.match(/alt="([^"]+)"/i) || innerHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i) || innerHtml.match(/class="[^"]*title[^"]*"[^>]*>([^<]+)</i);
             
             if (imgMatch) {
                 seen.add(path);
-                let cover = imgMatch[1].replace(/&amp;/g, '&'); // Bersihkan URL
+                let cover = imgMatch[1].replace(/&amp;/g, '&');
                 let title = titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' ');
                 
                 mangaList.push({
