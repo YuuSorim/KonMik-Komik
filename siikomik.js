@@ -1,7 +1,7 @@
 // ID: ext_siikomik
 // NAME: Siikomik
 // TYPE: comic
-// VERSION: 1.0.1
+// VERSION: 1.0.2
 // COLOR: #ff4757
 // ICON: https://www.google.com/s2/favicons?domain=siikomik.com&sz=64
 // REFERER: https://siikomik.com/
@@ -37,58 +37,64 @@ function cleanUrl(url) {
     return url.replace(/\u0026amp;/g, '\u0026');
 }
 
+// Menyimpan ID komik pertama dari halaman 1, untuk mendeteksi
+// kalau situs mengabaikan parameter page dan mengembalikan halaman yang sama.
+var _firstIds = {};
+
 var KonmikExtension = {
     // 1. Ambil Daftar Komik
-async getList(page, query, filters) {
-    page = page || 1;
+    async getList(page, query, filters) {
+        page = page || 1;
 
-    let url;
-    if (query) {
-        url = `${BASE}/cari/?q=${encodeURIComponent(query)}` + (page > 1 ? `&page=${page}` : '');
-    } else {
-        url = page > 1 ? `${BASE}/komik/?page=${page}` : `${BASE}/komik/`;
-    }
-
-    const html = await fetchHtml(url);
-    const mangaList = [];
-    const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-    let m;
-    const seen = new Set();
-
-    while ((m = cardRegex.exec(html)) !== null) {
-        const path = m[1];
-        const innerHtml = m[2];
-
-        if (path.includes('/chapter-') || path.includes('/genre/') || seen.has(path)) continue;
-
-        const imgMatch = innerHtml.match(/(?:src|data-src)="([^"]+)"/i);
-        let titleMatch = innerHtml.match(/alt="([^"]+)"/i) || innerHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i) || innerHtml.match(/class="[^"]*title[^"]*"[^>]*>([^<]+)</i);
-
-        if (imgMatch) {
-            seen.add(path);
-            mangaList.push({
-                id: path,
-                title: titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' '),
-                cover_url: cleanUrl(imgMatch[1]),
-                latest_chapter: '',
-                rating: '-',
-                views: '-'
-            });
+        let url;
+        if (query) {
+            url = `${BASE}/cari/?q=${encodeURIComponent(query)}` + (page > 1 ? `&page=${page}` : '');
+        } else {
+            url = page > 1 ? `${BASE}/komik/?page=${page}` : `${BASE}/komik/`;
         }
-    }
 
-    // Pengaman: kalau situs mengabaikan ?page= dan mengembalikan halaman yang sama, berhenti.
-    this._firstIds = this._firstIds || {};
-    const key = query || '_catalog';
-    const sig = mangaList.length ? mangaList[0].id : '';
-    if (page === 1) {
-        this._firstIds[key] = sig;
-    } else if (!sig || sig === this._firstIds[key]) {
-        return { manga_list: [] };
-    }
+        const html = await fetchHtml(url);
+        const mangaList = [];
+        const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        let m;
+        const seen = new Set();
 
-    return { manga_list: mangaList };
-},
+        while ((m = cardRegex.exec(html)) !== null) {
+            const path = m[1];
+            const innerHtml = m[2];
+
+            if (path.includes('/chapter-') || path.includes('/genre/') || seen.has(path)) continue;
+
+            const imgMatch = innerHtml.match(/(?:src|data-src)="([^"]+)"/i);
+            let titleMatch = innerHtml.match(/alt="([^"]+)"/i) || innerHtml.match(/<h[23][^>]*>([^<]+)<\/h[23]>/i) || innerHtml.match(/class="[^"]*title[^"]*"[^>]*>([^<]+)</i);
+
+            if (imgMatch) {
+                seen.add(path);
+                let cover = cleanUrl(imgMatch[1]);
+                let title = titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' ');
+
+                mangaList.push({
+                    id: path,
+                    title: title,
+                    cover_url: cover,
+                    latest_chapter: '',
+                    rating: '-',
+                    views: '-'
+                });
+            }
+        }
+
+        // Pengaman: kalau halaman >1 isinya sama dengan halaman 1 (atau kosong), berhenti.
+        const key = query || '_catalog';
+        const sig = mangaList.length ? mangaList[0].id : '';
+        if (page === 1) {
+            _firstIds[key] = sig;
+        } else if (!sig || sig === _firstIds[key]) {
+            return { manga_list: [] };
+        }
+
+        return { manga_list: mangaList };
+    },
 
     // 2. Ambil Detail Komik
     async getDetail(slug) {
@@ -113,7 +119,7 @@ async getList(page, query, filters) {
         if (titleMatch) title = titleMatch[1].trim();
 
         const coverMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
-        if (coverMatch) cover = cleanUrl(coverMatch[1]); // Pakai fungsi cleanUrl
+        if (coverMatch) cover = cleanUrl(coverMatch[1]);
 
         const descMatch = html.match(/<div class="prose-sk[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
         if (descMatch) {
@@ -220,7 +226,7 @@ async getList(page, query, filters) {
                     try {
                         const pagesData = JSON.parse(jsonStr);
                         if (pagesData && pagesData.pages) {
-                            images = pagesData.pages.map(p => cleanUrl(p.url)); // Pakai fungsi cleanUrl
+                            images = pagesData.pages.map(p => cleanUrl(p.url));
                         }
                     } catch (e) {}
                 }
@@ -231,7 +237,7 @@ async getList(page, query, filters) {
             const imgRegex = /<img[^>]+src="(https:\/\/siikomik\.com\/api\/media\/[^"]+)"[^>]*>/gi;
             let m;
             while ((m = imgRegex.exec(html)) !== null) {
-                const clean = cleanUrl(m[1]); // Pakai fungsi cleanUrl
+                const clean = cleanUrl(m[1]);
                 if (!images.includes(clean)) {
                     images.push(clean);
                 }
