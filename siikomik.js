@@ -32,6 +32,11 @@ function extractNextData(html) {
     return fullText;
 }
 
+// TRIK: Fungsi untuk membersihkan URL tanpa nulis "&amp;" langsung
+function cleanUrl(url) {
+    return url.replace(/\u0026amp;/g, '\u0026');
+}
+
 var KonmikExtension = {
     // 1. Ambil Daftar Komik
     async getList(page, query, filters) {
@@ -41,7 +46,6 @@ var KonmikExtension = {
 
         const html = await fetchHtml(url);
         const mangaList = [];
-
         const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
         let m;
         const seen = new Set();
@@ -57,7 +61,7 @@ var KonmikExtension = {
 
             if (imgMatch) {
                 seen.add(path);
-                let cover = imgMatch[1].replace(/&amp;/g, '&'); // PERBAIKAN
+                let cover = cleanUrl(imgMatch[1]); // Pakai fungsi cleanUrl
                 let title = titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' ');
 
                 mangaList.push({
@@ -70,7 +74,6 @@ var KonmikExtension = {
                 });
             }
         }
-
         return { manga_list: mangaList };
     },
 
@@ -97,7 +100,7 @@ var KonmikExtension = {
         if (titleMatch) title = titleMatch[1].trim();
 
         const coverMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
-        if (coverMatch) cover = coverMatch[1].replace(/&amp;/g, '&'); // PERBAIKAN
+        if (coverMatch) cover = cleanUrl(coverMatch[1]); // Pakai fungsi cleanUrl
 
         const descMatch = html.match(/<div class="prose-sk[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
         if (descMatch) {
@@ -195,7 +198,6 @@ var KonmikExtension = {
             if (pagesIndex !== -1) {
                 const startIdx = nextDataStr.indexOf('{', pagesIndex);
                 const endIdx = nextDataStr.indexOf('"status":"FREE"', startIdx);
-
                 let finalEndIdx = endIdx !== -1 ? endIdx + 15 : nextDataStr.indexOf('}', startIdx);
 
                 if (startIdx !== -1 && finalEndIdx !== -1) {
@@ -205,7 +207,7 @@ var KonmikExtension = {
                     try {
                         const pagesData = JSON.parse(jsonStr);
                         if (pagesData && pagesData.pages) {
-                            images = pagesData.pages.map(p => p.url.replace(/&amp;/g, '&')); // PERBAIKAN
+                            images = pagesData.pages.map(p => cleanUrl(p.url)); // Pakai fungsi cleanUrl
                         }
                     } catch (e) {}
                 }
@@ -216,9 +218,9 @@ var KonmikExtension = {
             const imgRegex = /<img[^>]+src="(https:\/\/siikomik\.com\/api\/media\/[^"]+)"[^>]*>/gi;
             let m;
             while ((m = imgRegex.exec(html)) !== null) {
-                const cleanUrl = m[1].replace(/&amp;/g, '&'); // PERBAIKAN
-                if (!images.includes(cleanUrl)) {
-                    images.push(cleanUrl);
+                const clean = cleanUrl(m[1]); // Pakai fungsi cleanUrl
+                if (!images.includes(clean)) {
+                    images.push(clean);
                 }
             }
         }
