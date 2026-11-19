@@ -1,7 +1,7 @@
 // ID: ext_siikomik
 // NAME: Siikomik
 // TYPE: comic
-// VERSION: 1.1.0
+// VERSION: 1.1.1
 // COLOR: #ff4757
 // ICON: https://www.google.com/s2/favicons?domain=siikomik.com&sz=64
 // REFERER: https://siikomik.com/
@@ -54,6 +54,19 @@ function extractNextData(html) {
 // TRIK: Fungsi untuk membersihkan URL tanpa nulis "&amp;" langsung
 function cleanUrl(url) {
     return url.replace(/\u0026amp;/g, '\u0026');
+}
+
+// Ubah kode HTML seperti &#39; &#34; &amp; &quot; menjadi karakter aslinya.
+function decodeHtml(s) {
+    return s
+        .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+        .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\u0026amp;/g, '\u0026');
 }
 
 // 'cover' dari API berupa objek; cari URL gambarnya dengan beberapa kemungkinan nama field.
@@ -177,14 +190,19 @@ var KonmikExtension = {
         let chapters = [];
 
         const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
-        if (titleMatch) title = titleMatch[1].trim();
+        if (titleMatch) title = decodeHtml(titleMatch[1]).trim();
 
         const coverMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
         if (coverMatch) cover = cleanUrl(coverMatch[1]);
 
         const descMatch = html.match(/<div class="prose-sk[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
         if (descMatch) {
-            description = descMatch[1].replace(/<[^>]+>/g, '\n').replace(/\n+/g, '\n').trim();
+            description = decodeHtml(
+                descMatch[1]
+                    .replace(/<br\s*\/?>/gi, '\n')
+                    .replace(/<\/p>/gi, '\n')
+                    .replace(/<[^>]+>/g, '')
+            ).replace(/\n{2,}/g, '\n').trim();
         }
 
         if (nextDataStr) {
