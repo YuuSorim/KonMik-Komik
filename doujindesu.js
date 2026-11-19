@@ -1,7 +1,7 @@
 // ID: ext_doujindesu
 // NAME: DoujinDesu
 // TYPE: comic
-// VERSION: 1.0.1
+// VERSION: 1.0.3
 // COLOR: #ff4757
 // ICON: https://www.google.com/s2/favicons?domain=doujin.desu.xxx&sz=64
 // REFERER: https://doujin.desu.xxx/
@@ -14,55 +14,54 @@ const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     'Referer': BASE + '/',
     'Origin': BASE,
-    'X-App-Secret': APP_SECRET
+    'X-App-Secret': APP_SECRET,
+    'x-device-id': 'dev_bh7cicmqwyb_mamv9'
 };
 
-// 1. Fungsi XOR Dasar
-function xorDecrypt(str, key) {
-    let result = '';
-    for (let i = 0; i < str.length; i++) {
-        result += String.fromCharCode(str.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+// FUNGSI DEKRIPSI ASLI (Berdasarkan baris ke-4 dari screenshot kamu)
+function decryptData(hexStr, keyStr) {
+    let r = [];
+    let n = []; // Array nilai kunci
+    for (let i = 0; i < keyStr.length; i++) {
+        n.push(keyStr.charCodeAt(i));
     }
-    return result;
-}
-
-// 2. Fungsi Dekripsi Utama (Mengikuti logika fungsi To & il)
-function decryptData(hexStr) {
-    // Konversi Hex ke String Binary
-    let binStr = '';
+    
+    let o = 0, a = 0; // Variabel state
     for (let i = 0; i < hexStr.length; i += 2) {
-        binStr += String.fromCharCode(parseInt(hexStr.substring(i, i + 2), 16));
+        // Ambil 2 digit hex (contoh: "a1")
+        let hexPair = hexStr.substring(i, i + 2);
+        let val = parseInt(hexPair, 16); // Konversi ke angka desimal
+        
+        // Ambil kunci berdasarkan indeks modulo
+        let k = (i / 2) % n.length;
+        
+        // Rumus Chained XOR (dari screenshot)
+        let l = (val - n[k]) % 256;
+        if (l < 0) l += 256; // Pastikan positif
+        
+        // XOR dengan state sebelumnya
+        let decodedChar = l ^ a ^ o ^ r[n.length % 5]; 
+        
+        r.push(String.fromCharCode(decodedChar));
+        
+        // Update state (mengikuti logika matematika dari kode asli)
+        o = (o + 1) % 256;
+        a = (a + decodedChar) % 256;
     }
-
-    // Di DoujinDesu, kunci XOR dibentuk dari gabungan APP_SECRET dan SALT
-    // Kita coba beberapa kemungkinan kunci yang biasa dipakai situs ini
-    const keysToTry = [
-        APP_SECRET + SALT,
-        SALT + APP_SECRET,
-        SALT,
-        APP_SECRET
-    ];
-
-    for (let key of keysToTry) {
+    
+    try {
+        // Kadang hasilnya perlu di-decode dari URL encoding
+        let resultStr = r.join('');
         try {
-            let decrypted = xorDecrypt(binStr, key);
-            // Kadang hasilnya masih di-encode URL (seperti %7B untuk '{')
-            try {
-                decrypted = decodeURIComponent(decrypted);
-            } catch(e) {}
-            
-            // Cek apakah hasilnya JSON yang valid
-            if (decrypted.startsWith('{') || decrypted.startsWith('[')) {
-                return JSON.parse(decrypted);
-            }
-        } catch (e) {
-            // Lanjut coba kunci berikutnya
-        }
+            resultStr = decodeURIComponent(resultStr);
+        } catch(e) {}
+        
+        return JSON.parse(resultStr);
+    } catch (e) {
+        throw new Error('Gagal mendekripsi data');
     }
-    throw new Error('Kunci dekripsi tidak cocok');
 }
 
-// 3. Fungsi Fetch API
 async function fetchApi(endpoint) {
     const res = await fetch(BASE + endpoint, { headers });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -75,25 +74,22 @@ async function fetchApi(endpoint) {
         throw new Error('Respons bukan JSON');
     }
 
-    // Jika data terenkripsi
     if (json._enc_resp_) {
-        return decryptData(json._enc_resp_);
+        return decryptData(json._enc_resp_, SALT);
     }
     return json;
 }
 
 var KonmikExtension = {
-    // 4. Ambil Daftar Komik
     async getList(page, query, filters) {
-        // Kita ganti endpoint-nya agar lebih umum (manga, manhwa, doujin)
+        const offset = (page - 1) * 20;
         let endpoint = query 
-            ? `/api/manga?search=${encodeURIComponent(query)}&page=${page}`
-            : `/api/manga?limit=20&page=${page}`; 
+            ? `/api/manga?search=${encodeURIComponent(query)}&limit=20&offset=${offset}`
+            : `/api/manga?limit=20&offset=${offset}`;
             
         const data = await fetchApi(endpoint);
         const mangaList = [];
         
-        // Sesuaikan dengan struktur JSON DoujinDesu (biasanya data.data)
         const items = data.data || data.manga || [];
         
         for (const item of items) {
@@ -106,11 +102,9 @@ var KonmikExtension = {
                 views: item.views || '-'
             });
         }
-        
         return { manga_list: mangaList };
     },
 
-    // 5. Ambil Detail Komik
     async getDetail(slug) {
         const data = await fetchApi(`/api/manga/${slug}`);
         
@@ -132,10 +126,8 @@ var KonmikExtension = {
         };
     },
 
-    // 6. Ambil Gambar Chapter
     async getChapterImages(endpoint) {
         const data = await fetchApi(`/api/chapter/${endpoint}`);
-        
         const images = data.images || [];
         return images.map(img => img.url || img);
     }
