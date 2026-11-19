@@ -1,23 +1,42 @@
 // ID: ext_siikomik
 // NAME: Siikomik
 // TYPE: comic
-// VERSION: 1.0.2
+// VERSION: 1.1.0
 // COLOR: #ff4757
 // ICON: https://www.google.com/s2/favicons?domain=siikomik.com&sz=64
 // REFERER: https://siikomik.com/
 
 const BASE = 'https://siikomik.com';
+const PAGE_SIZE = 25;
 const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     'Referer': 'https://siikomik.com/',
     'Origin': 'https://siikomik.com',
     'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
 };
+const apiHeaders = {
+    'User-Agent': headers['User-Agent'],
+    'Referer': 'https://siikomik.com/komik/',
+    'Origin': 'https://siikomik.com',
+    'Accept': 'application/json, text/plain, */*'
+};
 
 async function fetchHtml(url) {
     const res = await fetch(url, { headers });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.text();
+}
+
+// Ambil daftar komik dari API internal Siikomik (paginasi pakai cursor offset)
+async function fetchApi(sort, page) {
+    let url = `${BASE}/api/v1/comic?limit=${PAGE_SIZE}&sort=${sort}`;
+    if (page > 1) {
+        url += `&cursor=${encodeURIComponent('offset:' + ((page - 1) * PAGE_SIZE))}`;
+    }
+    const res = await fetch(url, { headers: apiHeaders });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    return JSON.parse(text);
 }
 
 function extractNextData(html) {
@@ -37,22 +56,77 @@ function cleanUrl(url) {
     return url.replace(/\u0026amp;/g, '\u0026');
 }
 
-// Menyimpan ID komik pertama dari halaman 1, untuk mendeteksi
-// kalau situs mengabaikan parameter page dan mengembalikan halaman yang sama.
-var _firstIds = {};
+// 'cover' dari API berupa objek; cari URL gambarnya dengan beberapa kemungkinan nama field.
+function pickCover(c) {
+    if (!c) return '';
+    if (typeof c === 'string') return fixUrl(c);
+    const keys = ['thumbnail350', 'thumbnail430', 'thumbnailDefault', 'thumbnail450', 'thumbnail250', 'url', 'src', 'thumbnail193', 'large', 'medium', 'original', 'image', 'path'];
+    for (const k of keys) {
+        if (c[k]) {
+            const v = pickCover(c[k]);
+            if (v) return v;
+        }
+    }
+    for (const k in c) {
+        const v = c[k];
+        if (typeof v === 'string' && /^(https?:)?\/|\.(webp|jpe?g|png|avif)/i.test(v)) return fixUrl(v);
+    }
+    return '';
+}
+
+function fixUrl(u) {
+    u = cleanUrl(u);
+    if (u.startsWith('//')) return 'https:' + u;
+    if (u.startsWith('/')) return BASE + u;
+    return u;
+}
 
 var KonmikExtension = {
     // 1. Ambil Daftar Komik
     async getList(page, query, filters) {
         page = page || 1;
 
-        let url;
-        if (query) {
-            url = `${BASE}/cari/?q=${encodeURIComponent(query)}` + (page > 1 ? `&page=${page}` : '');
-        } else {
-            url = page > 1 ? `${BASE}/komik/?page=${page}` : `${BASE}/komik/`;
+        // Pencarian: pakai halaman HTML pencarian (cara lama)
+        if (query && query.trim()) {
+            return await KonmikExtension._searchHtml(page, query.trim());
         }
 
+        const sort = (filters && filters.sort === 'popular') ? 'popular' : 'latest';
+        let data;
+        try {
+            data = await fetchApi(sort, page);
+        } catch (e) {
+            if (sort !== 'latest') {
+                data = await fetchApi('latest', page);
+            } else {
+                throw e;
+            }
+        }
+
+        const items = (data && data.items) ? data.items : [];
+        const mangaList = [];
+        for (const it of items) {
+            if (!it || !it.slug) continue;
+            const lc = (it.latestChapters && it.latestChapters.length) ? it.latestChapters[0] : null;
+            let latest = '';
+            if (lc) {
+                latest = lc.name || lc.title || (lc.number !== undefined ? 'Ch. ' + lc.number : '');
+            }
+            mangaList.push({
+                id: '/komik/' + it.slug + '/',
+                title: it.title || it.name || it.slug.replace(/-/g, ' '),
+                cover_url: pickCover(it.cover),
+                latest_chapter: latest,
+                rating: (it.ratingAvg !== undefined && it.ratingAvg !== null) ? String(it.ratingAvg) : '-',
+                views: (typeof it.views === 'number') ? (it.views >= 1000 ? (it.views / 1000).toFixed(1) + 'K' : String(it.views)) : '-'
+            });
+        }
+        return { manga_list: mangaList };
+    },
+
+    // Pencarian lewat HTML (cara lama, regex)
+    async _searchHtml(page, query) {
+        const url = `${BASE}/cari/?q=${encodeURIComponent(query)}` + (page > 1 ? `&page=${page}` : '');
         const html = await fetchHtml(url);
         const mangaList = [];
         const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
@@ -70,29 +144,16 @@ var KonmikExtension = {
 
             if (imgMatch) {
                 seen.add(path);
-                let cover = cleanUrl(imgMatch[1]);
-                let title = titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' ');
-
                 mangaList.push({
                     id: path,
-                    title: title,
-                    cover_url: cover,
+                    title: titleMatch ? titleMatch[1].trim() : path.split('/').filter(Boolean).pop().replace(/-/g, ' '),
+                    cover_url: fixUrl(imgMatch[1]),
                     latest_chapter: '',
                     rating: '-',
                     views: '-'
                 });
             }
         }
-
-        // Pengaman: kalau halaman >1 isinya sama dengan halaman 1 (atau kosong), berhenti.
-        const key = query || '_catalog';
-        const sig = mangaList.length ? mangaList[0].id : '';
-        if (page === 1) {
-            _firstIds[key] = sig;
-        } else if (!sig || sig === _firstIds[key]) {
-            return { manga_list: [] };
-        }
-
         return { manga_list: mangaList };
     },
 
