@@ -1,7 +1,7 @@
 // ID: ext_doujindesu
 // NAME: DoujinDesu
 // TYPE: comic
-// VERSION: 1.0.3
+// VERSION: 1.0.4
 // COLOR: #ff4757
 // ICON: https://www.google.com/s2/favicons?domain=doujin.desu.xxx&sz=64
 // REFERER: https://doujin.desu.xxx/
@@ -18,47 +18,42 @@ const headers = {
     'x-device-id': 'dev_bh7cicmqwyb_mamv9'
 };
 
-// FUNGSI DEKRIPSI ASLI (Berdasarkan baris ke-4 dari screenshot kamu)
-function decryptData(hexStr, keyStr) {
-    let r = [];
-    let n = []; // Array nilai kunci
-    for (let i = 0; i < keyStr.length; i++) {
-        n.push(keyStr.charCodeAt(i));
+// FUNGSI DEKRIPSI FINAL (Chained XOR dengan State)
+function decryptData(hexStr) {
+    let result = "";
+    // Inisialisasi state dari kunci salt
+    let s1 = 0, s2 = 0, s3 = 0;
+    for (let i = 0; i < SALT.length; i++) {
+        s1 = (s1 + SALT.charCodeAt(i)) % 256;
+        s2 = (s2 ^ SALT.charCodeAt(i)) % 256;
+        s3 = (s3 + (SALT.charCodeAt(i) * i)) % 256;
     }
-    
-    let o = 0, a = 0; // Variabel state
+
     for (let i = 0; i < hexStr.length; i += 2) {
-        // Ambil 2 digit hex (contoh: "a1")
-        let hexPair = hexStr.substring(i, i + 2);
-        let val = parseInt(hexPair, 16); // Konversi ke angka desimal
-        
-        // Ambil kunci berdasarkan indeks modulo
-        let k = (i / 2) % n.length;
-        
-        // Rumus Chained XOR (dari screenshot)
-        let l = (val - n[k]) % 256;
-        if (l < 0) l += 256; // Pastikan positif
-        
-        // XOR dengan state sebelumnya
-        let decodedChar = l ^ a ^ o ^ r[n.length % 5]; 
-        
-        r.push(String.fromCharCode(decodedChar));
-        
-        // Update state (mengikuti logika matematika dari kode asli)
-        o = (o + 1) % 256;
-        a = (a + decodedChar) % 256;
+        let hexByte = hexStr.substring(i, i + 2);
+        let c = parseInt(hexByte, 16);
+
+        // Rumus Chained XOR (Reverse Engineering dari file index-C9QCqnCZ.js)
+        let dec = c ^ s1 ^ s2 ^ s3;
+        result += String.fromCharCode(dec);
+
+        // Update state (ini yang bikin teksnya berubah-ubah)
+        s1 = (s1 + 1) % 256;
+        s2 = (s2 + dec) % 256;
+        s3 = (s3 ^ dec) % 256;
     }
-    
+
     try {
-        // Kadang hasilnya perlu di-decode dari URL encoding
-        let resultStr = r.join('');
-        try {
-            resultStr = decodeURIComponent(resultStr);
-        } catch(e) {}
-        
-        return JSON.parse(resultStr);
+        // Kadang hasilnya masih ter-encode URL (%7B untuk '{')
+        let cleanStr = decodeURIComponent(result);
+        return JSON.parse(cleanStr);
     } catch (e) {
-        throw new Error('Gagal mendekripsi data');
+        // Kalau gagal, coba tanpa decode URI
+        try {
+            return JSON.parse(result);
+        } catch (e2) {
+            throw new Error("Gagal mendekripsi data. Kunci mungkin berubah.");
+        }
     }
 }
 
@@ -75,7 +70,7 @@ async function fetchApi(endpoint) {
     }
 
     if (json._enc_resp_) {
-        return decryptData(json._enc_resp_, SALT);
+        return decryptData(json._enc_resp_);
     }
     return json;
 }
@@ -90,13 +85,14 @@ var KonmikExtension = {
         const data = await fetchApi(endpoint);
         const mangaList = [];
         
-        const items = data.data || data.manga || [];
+        // Sesuaikan dengan struktur JSON DoujinDesu
+        const items = data.data || data.manga || data.results || [];
         
         for (const item of items) {
             mangaList.push({
                 id: item.slug,
                 title: item.title,
-                cover_url: item.thumbnail || item.cover,
+                cover_url: item.thumbnail || item.cover || item.image,
                 latest_chapter: item.latest_chapter ? item.latest_chapter.title : '',
                 rating: item.rating || '-',
                 views: item.views || '-'
@@ -111,24 +107,25 @@ var KonmikExtension = {
         return {
             title: data.title || 'Unknown',
             cover_url: data.thumbnail || '',
-            description: data.synopsis || '',
+            description: data.synopsis || data.description || '',
             author: data.author || '',
             artist: data.artist || data.author || '',
             rating: data.rating || '-',
             views: data.views || '-',
-            genres: data.genres ? data.genres.map(g => g.name) : [],
+            genres: data.genres ? data.genres.map(g => typeof g === 'string' ? g : g.name) : [],
             chapters: (data.chapters || []).map(ch => ({
                 id: ch.id,
-                title: ch.title,
+                title: ch.title || ch.name,
                 endpoint: ch.id,
-                date: ch.date || ''
+                date: ch.date || ch.created_at || ''
             }))
         };
     },
 
     async getChapterImages(endpoint) {
         const data = await fetchApi(`/api/chapter/${endpoint}`);
-        const images = data.images || [];
-        return images.map(img => img.url || img);
+        
+        const images = data.images || data.pages || [];
+        return images.map(img => typeof img === 'string' ? img : (img.url || img.image));
     }
 };
