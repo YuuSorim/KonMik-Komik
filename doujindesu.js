@@ -17,38 +17,47 @@ const headers = {
     'X-App-Secret': APP_SECRET
 };
 
-// Fungsi Enkripsi/Dekripsi XOR (karena situs ini mengenkripsi datanya)
-function xorCrypt(str, key) {
+// 1. Fungsi Dekripsi (Hasil Reverse Engineering dari fungsi To)
+function decrypt(hex, key) {
     let result = '';
-    for (let i = 0; i < str.length; i++) {
-        result += String.fromCharCode(str.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    for (let i = 0; i < hex.length; i += 2) {
+        // Ambil 2 karakter hex, ubah ke integer basis 16
+        const charCode = parseInt(hex.substring(i, i + 2), 16);
+        // XOR dengan karakter kunci (berulang)
+        const keyCode = key.charCodeAt((i / 2) % key.length);
+        result += String.fromCharCode(charCode ^ keyCode);
     }
     return result;
 }
 
+// 2. Fungsi Fetch API
 async function fetchApi(endpoint) {
     const res = await fetch(BASE + endpoint, { headers });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    let text = await res.text();
-    
-    // Coba parsing JSON
-    try {
-        let json = JSON.parse(text);
-        // Jika respons terenkripsi (biasanya ada field _enc_resp_)
-        if (json._enc_resp_) {
-            // Dekripsi menggunakan XOR (Ini asumsi logika dari kuroneko/doujin-scraper)
-            const decrypted = xorCrypt(json._enc_resp_, SALT);
-            json = JSON.parse(decrypted);
+    const json = await res.json();
+
+    // Jika data terenkripsi
+    if (json._enc_resp_) {
+        try {
+            // Dekripsi data
+            let decrypted = decrypt(json._enc_resp_, SALT);
+            
+            // Terkadang hasil dekripsi masih di-encode URL, kita coba decode
+            try {
+                decrypted = decodeURIComponent(decrypted);
+            } catch(e) {}
+            
+            return JSON.parse(decrypted);
+        } catch (e) {
+            throw new Error('Gagal mendekripsi data');
         }
-        return json;
-    } catch (e) {
-        throw new Error('Gagal membaca data dari API');
     }
+    return json;
 }
 
 var KonmikExtension = {
+    // 3. Ambil Daftar Komik
     async getList(page, query, filters) {
-        // Endpoint API berdasarkan pantauan Network (limit 12, sort terbaru)
         let endpoint = query 
             ? `/api/manga?search=${encodeURIComponent(query)}&page=${page}`
             : `/api/manga?limit=12&type=manhwa&sort=latest_chapter&page=${page}`;
@@ -56,7 +65,7 @@ var KonmikExtension = {
         const data = await fetchApi(endpoint);
         const mangaList = [];
         
-        // Asumsi data berbentuk array di dalam objek 'data'
+        // Sesuaikan dengan struktur JSON DoujinDesu (biasanya data.data)
         const items = data.data || data.manga || [];
         
         for (const item of items) {
@@ -73,11 +82,10 @@ var KonmikExtension = {
         return { manga_list: mangaList };
     },
 
+    // 4. Ambil Detail Komik
     async getDetail(slug) {
-        // Endpoint detail komik
         const data = await fetchApi(`/api/manga/${slug}`);
         
-        // Parse data detail (sesuaikan dengan struktur JSON yang sebenarnya)
         return {
             title: data.title || 'Unknown',
             cover_url: data.thumbnail || '',
@@ -96,11 +104,10 @@ var KonmikExtension = {
         };
     },
 
+    // 5. Ambil Gambar Chapter
     async getChapterImages(endpoint) {
-        // Endpoint gambar chapter
         const data = await fetchApi(`/api/chapter/${endpoint}`);
         
-        // Ambil array gambar
         const images = data.images || [];
         return images.map(img => img.url || img);
     }
