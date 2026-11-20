@@ -1,7 +1,7 @@
 // ID: ext_novel_bacalightnovel
 // NAME: BacaLightNovel
 // TYPE: novel
-// VERSION: 1.0.0
+// VERSION: 1.0.2
 // COLOR: #3B5998
 // ICON: https://www.google.com/s2/favicons?domain=bacalightnovel.co&sz=64
 // REFERER: https://bacalightnovel.co/
@@ -27,6 +27,24 @@ var KonmikExtension = {
   // 1. LIST / SEARCH
   // ---------------------------------------------------------------
   async getList(page, query, filters) {
+    try {
+      return await this._getListReal(page, query, filters);
+    } catch (e) {
+      // Mode diagnosis: tampilkan error sebagai item agar terlihat di layar
+      if ((page || 1) > 1) return [];
+      return [{
+        id: "debug-error",
+        slug: "debug-error",
+        title: "ERROR: " + (e && e.message ? e.message : String(e)),
+        cover: "",
+        source: this.sourceId,
+        type: "Web Novel",
+        status: "Ongoing"
+      }];
+    }
+  },
+
+  async _getListReal(page, query, filters) {
     page = page || 1;
     filters = filters || {};
     const urls = [];
