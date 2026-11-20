@@ -1,7 +1,7 @@
 // ID: ext_novel_bacalightnovel
 // NAME: BacaLightNovel
 // TYPE: novel
-// VERSION: 1.0.2
+// VERSION: 1.0.3
 // COLOR: #3B5998
 // ICON: https://www.google.com/s2/favicons?domain=bacalightnovel.co&sz=64
 // REFERER: https://bacalightnovel.co/
@@ -10,11 +10,19 @@ var KonmikExtension = {
   baseUrl: "https://bacalightnovel.co",
   sourceId: "ext_novel_bacalightnovel",
 
+  // ==== ISI DUA BARIS INI JIKA SITUS MEMBLOKIR (Cloudflare) ====
+  // cfClearance : nilai cookie "cf_clearance" dari browser (tanpa "cf_clearance=")
+  // userAgent   : User-Agent browser yang SAMA persis dengan yang dipakai saat ambil cookie
+  cfClearance: "",
+  userAgent: "",
+
   _headers() {
-    return {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    const h = {
+      "User-Agent": this.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       "Referer": this.baseUrl + "/"
     };
+    if (this.cfClearance) h["Cookie"] = "cf_clearance=" + this.cfClearance;
+    return h;
   },
 
   async _get(url) {
