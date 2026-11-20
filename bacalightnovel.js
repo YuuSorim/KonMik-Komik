@@ -1,7 +1,7 @@
 // ID: ext_novel_bacalightnovel
 // NAME: BacaLightNovel
 // TYPE: novel
-// VERSION: 1.0.3
+// VERSION: 1.0.4
 // COLOR: #3B5998
 // ICON: https://www.google.com/s2/favicons?domain=bacalightnovel.co&sz=64
 // REFERER: https://bacalightnovel.co/
@@ -13,8 +13,8 @@ var KonmikExtension = {
   // ==== ISI DUA BARIS INI JIKA SITUS MEMBLOKIR (Cloudflare) ====
   // cfClearance : nilai cookie "cf_clearance" dari browser (tanpa "cf_clearance=")
   // userAgent   : User-Agent browser yang SAMA persis dengan yang dipakai saat ambil cookie
-  cfClearance: "",
-  userAgent: "",
+  cfClearance: "CshuZ5nHfiTVZ36OFPVbW58oCe_Xg2_yxHkuB3muOsO5AA5L0GeSnIf7IIBWcuAZ8ebhahmGscH6fx-l64n_9qRCCnBlh10_ohOUpUpmvY83Eo6jaRXxZbV_Bc9ecuWtQMJoFfR1nAxzraLfC0BOVQzbEiuo0jazOKtYv9L_vlZVQskx5IyN7IO1aDElt5Zmu75i4_rjDUcKq1fiZ-6sxAHPxTYb3t5HFDrTA-MfrMCP28jFHUxxhmahkh3roFn2kgouQ2tAsFmZ2kK1AMbdc0WXVIEkQCEhyioCS1o_ff5OGWPH44IEhG6DtFIbXPrib-Ehv5ku6vJB8bOUBiGKrBpzcqUDnHdsoDCqq9CI_Tr1a3hWV6xR9CWwqMLbvWtXU7y_Rq1TR72g2Y-x8Kia98I",
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
 
   _headers() {
     const h = {
