@@ -19,7 +19,7 @@ var KonmikExtension = {
 
   async _get(url) {
     const res = await fetch(url, { headers: this._headers() });
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    if (res.ok === false) throw new Error("HTTP " + res.status + " saat membuka " + url);
     return await res.text();
   },
 
@@ -28,20 +28,35 @@ var KonmikExtension = {
   // ---------------------------------------------------------------
   async getList(page, query, filters) {
     page = page || 1;
-    let url;
+    filters = filters || {};
+    const urls = [];
     if (query && query.trim().length > 0) {
       const q = encodeURIComponent(query.trim());
-      url = page > 1
+      urls.push(page > 1
         ? `${this.baseUrl}/page/${page}/?s=${q}`
-        : `${this.baseUrl}/?s=${q}`;
+        : `${this.baseUrl}/?s=${q}`);
     } else {
-      const sort = filters && filters.sort ? filters.sort : "popular";
-      const order = sort === "latest" ? "update" : "popular";
-      url = `${this.baseUrl}/series/?type%5B%5D=novel&order=${order}` + (page > 1 ? `&page=${page}` : "");
+      const sort = filters.sort || filters.order || "popular";
+      const order = (sort === "latest" || sort === "update") ? "update" : "popular";
+      const pg = page > 1 ? `&page=${page}` : "";
+      urls.push(`${this.baseUrl}/series/?order=${order}${pg}`);
+      urls.push(`${this.baseUrl}/series/?${page > 1 ? "page=" + page : ""}`);
     }
 
-    const html = await this._get(url);
-    return this._parseCards(html);
+    let lastHtml = "";
+    for (const url of urls) {
+      const html = await this._get(url);
+      lastHtml = html;
+      const items = this._parseCards(html);
+      if (items.length > 0) return items;
+    }
+
+    // Kosong: cek penyebabnya supaya mudah didiagnosis
+    if (/just a moment|cf-browser-verification|challenge-platform|cf-chl|attention required/i.test(lastHtml)) {
+      throw new Error("Diblokir Cloudflare/bot detection oleh situs");
+    }
+    if (page > 1) return [];
+    throw new Error("Kartu novel tidak ditemukan. Panjang HTML: " + lastHtml.length + ", awal: " + lastHtml.substring(0, 150).replace(/\s+/g, " "));
   },
 
   _parseCards(html) {
