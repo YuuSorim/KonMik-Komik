@@ -21,39 +21,40 @@ async function fetchHtml(url) {
 var KonmikExtension = {
     // 1. Ambil Daftar Komik (Katalog / Pencarian)
     async getList(page, query, filters) {
-        let url = query 
-            ? `${BASE}/search?q=${encodeURIComponent(query)}` 
-            : `${BASE}/`; 
+    // Trik: Paksa ambil dari halaman pencarian meskipun query kosong
+    // Biasanya halaman /search menampilkan daftar komik yang lebih banyak
+    let searchQuery = query ? query : ""; 
+    let url = `${BASE}/search?q=${encodeURIComponent(searchQuery)}&page=${page}`;
 
-        const html = await fetchHtml(url);
-        const mangaList = [];
+    const html = await fetchHtml(url);
+    const mangaList = [];
 
-        // Regex berdasarkan struktur kartu komik Ryukomik
-        const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[^>]*alt="([^"]+)"/gi;
-        
-        let m;
-        const seen = new Set();
+    // Regex kita tetap sama
+    const cardRegex = /<a[^>]+href="(\/komik\/[^"]+)"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[^>]*alt="([^"]+)"/gi;
+    
+    let m;
+    const seen = new Set();
 
-        while ((m = cardRegex.exec(html)) !== null) {
-            const path = m[1];
-            const cover = m[2];
-            const title = m[3];
+    while ((m = cardRegex.exec(html)) !== null) {
+        const path = m[1];
+        const cover = m[2];
+        const title = m[3];
 
-            if (seen.has(path)) continue;
-            seen.add(path);
+        if (seen.has(path)) continue;
+        seen.add(path);
 
-            mangaList.push({
-                id: path,
-                title: title.trim(),
-                cover_url: cover,
-                latest_chapter: '',
-                rating: '-',
-                views: '-'
-            });
-        }
+        mangaList.push({
+            id: path,
+            title: title.trim(),
+            cover_url: cover,
+            latest_chapter: '',
+            rating: '-',
+            views: '-'
+        });
+    }
 
-        return { manga_list: mangaList };
-    },
+    return { manga_list: mangaList };
+},
 
     // 2. Ambil Detail Komik & Daftar Chapter
     async getDetail(slug) {
