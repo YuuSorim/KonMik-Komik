@@ -1,7 +1,7 @@
 // ID: ext_novel_bacalightnovel
 // NAME: BacaLightNovel
 // TYPE: novel
-// VERSION: 1.0.4
+// VERSION: 1.0.5
 // COLOR: #3B5998
 // ICON: https://www.google.com/s2/favicons?domain=bacalightnovel.co&sz=64
 // REFERER: https://bacalightnovel.co/
@@ -26,9 +26,18 @@ var KonmikExtension = {
   },
 
   async _get(url) {
-    const res = await fetch(url, { headers: this._headers() });
-    if (res.ok === false) throw new Error("HTTP " + res.status + " saat membuka " + url);
-    return await res.text();
+    const hdrs = this._headers();
+    const res = await fetch(url, { headers: hdrs });
+    const text = await res.text();
+    this._last = {
+      status: res.status,
+      len: text.length,
+      ck: hdrs["Cookie"] ? "Y" : "N"
+    };
+    if (res.ok === false && !/<article/i.test(text)) {
+      throw new Error(this._diag("HTTP"));
+    }
+    return text;
   },
 
   // ---------------------------------------------------------------
@@ -43,7 +52,7 @@ var KonmikExtension = {
       return [{
         id: "debug-error",
         slug: "debug-error",
-        title: "ERROR: " + (e && e.message ? e.message : String(e)),
+        title: (e && e.message ? e.message : String(e)),
         cover: "",
         source: this.sourceId,
         type: "Web Novel",
@@ -79,10 +88,10 @@ var KonmikExtension = {
 
     // Kosong: cek penyebabnya supaya mudah didiagnosis
     if (/just a moment|cf-browser-verification|challenge-platform|cf-chl|attention required/i.test(lastHtml)) {
-      throw new Error("Diblokir Cloudflare/bot detection oleh situs");
+      throw new Error(this._diag("CF-BLOCK"));
     }
     if (page > 1) return [];
-    throw new Error("Kartu novel tidak ditemukan. Panjang HTML: " + lastHtml.length + ", awal: " + lastHtml.substring(0, 150).replace(/\s+/g, " "));
+    throw new Error(this._diag("NO-CARD") + " awal=" + lastHtml.substring(0, 80).replace(/\s+/g, " "));
   },
 
   _parseCards(html) {
@@ -264,6 +273,11 @@ var KonmikExtension = {
   // ---------------------------------------------------------------
   // Helper
   // ---------------------------------------------------------------
+  _diag(label) {
+    const l = this._last || {};
+    return "v1.0.5 " + label + " st=" + l.status + " ck=" + l.ck + " len=" + l.len;
+  },
+
   _fixUrl(u) {
     if (!u) return "";
     u = u.trim();
