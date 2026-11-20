@@ -1,7 +1,7 @@
 // ID: ext_komiklab
 // NAME: Komiklab
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.0.1
 // COLOR: #870024
 // ICON: https://www.google.com/s2/favicons?domain=komiklab.cc&sz=64
 // REFERER: https://komiklab.cc/
@@ -94,6 +94,86 @@ function parseCards(html) {
     return list;
 }
 
+// Parser umum: cari tautan ke /manga/<slug>/ yang di dalamnya ada <img> (kartu komik),
+// tidak bergantung pada nama class.
+function parseCardsGeneric(html) {
+    const list = [];
+    const seen = new Set();
+    const re = /<a\s([^>]*?href="(https?:\/\/komiklab\.cc\/manga\/[^"\/?#]+\/?)"[^>]*)>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+        const attrs = m[1];
+        const href = m[2];
+        const inner = m[3];
+        const imgTag = inner.match(/<img[^>]*>/i);
+        if (!imgTag || seen.has(href)) continue;
+        seen.add(href);
+        const img = imgTag[0];
+
+        let title = '';
+        const ti = img.match(/\stitle="([^"]*)"/i) ||
+                   img.match(/\salt="([^"]*)"/i) ||
+                   attrs.match(/\btitle="([^"]*)"/i);
+        if (ti && ti[1].trim()) title = decodeHtml(ti[1]).trim();
+        if (!title) {
+            const tt = inner.match(/<(?:div class="tt"|h\d[^>]*)>([\s\S]*?)<\/(?:div|h\d)>/i);
+            if (tt) title = stripTags(tt[1]);
+        }
+        if (!title) title = href.replace(/\/$/, '').split('/').pop().replace(/-/g, ' ');
+
+        const ep = inner.match(/<div class="epxs">([\s\S]*?)<\/div>/i);
+        const score = inner.match(/<div class="numscore">([\s\S]*?)<\/div>/i);
+
+        list.push({
+            id: href,
+            title: title,
+            cover_url: pickImg(img),
+            latest_chapter: ep ? stripTags(ep[1]) : '',
+            rating: score ? stripTags(score[1]) : '-',
+            views: '-'
+        });
+    }
+    return list;
+}
+
+// Daftar chapter di halaman detail: tautan "<slug>-chapter-N" milik komik ini saja.
+function parseChapters(html, pageUrl) {
+    const slugM = pageUrl.replace(/\/$/, '').match(/\/manga\/([^\/?#]+)$/);
+    const series = slugM ? slugM[1] : '';
+
+    const collect = (filterBySeries) => {
+        const out = [];
+        const seen = new Set();
+        const re = /<a\s[^>]*href="(https?:\/\/komiklab\.cc\/[^"?#]+-chapter-[^"?#]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        let m;
+        while ((m = re.exec(html)) !== null) {
+            const link = m[1];
+            if (seen.has(link)) continue;
+            if (filterBySeries && series && link.indexOf('/' + series + '-chapter-') === -1) continue;
+
+            const inner = m[2];
+            const numM = inner.match(/<span class="chapternum">([\s\S]*?)<\/span>/i);
+            const dateM = inner.match(/<span class="chapterdate">([\s\S]*?)<\/span>/i);
+            const title = numM ? stripTags(numM[1]) : stripTags(inner);
+            // Abaikan tombol seperti "New Chapter" / "First Chapter"
+            if (!numM && !/^Chapter\s*\d/i.test(title)) continue;
+
+            seen.add(link);
+            out.push({
+                id: link,
+                title: title,
+                endpoint: link,
+                date: dateM ? stripTags(dateM[1]) : ''
+            });
+        }
+        return out;
+    };
+
+    let list = collect(true);
+    if (list.length === 0) list = collect(false);
+    return list;
+}
+
 var KonmikExtension = {
     // 1. Ambil Daftar Komik
     async getList(page, query, filters) {
@@ -109,7 +189,15 @@ var KonmikExtension = {
         }
 
         const html = await fetchHtml(url);
-        return { manga_list: parseCards(html) };
+        let cards = parseCardsGeneric(html);
+        if (cards.length === 0) cards = parseCards(html);
+
+        // Cadangan: kalau halaman daftar kosong, pakai halaman beranda (Latest Update)
+        if (cards.length === 0 && !(query && query.trim())) {
+            const alt = page > 1 ? `${BASE}/page/${page}/` : `${BASE}/`;
+            cards = parseCardsGeneric(await fetchHtml(alt));
+        }
+        return { manga_list: cards };
     },
 
     // 2. Ambil Detail Komik
@@ -174,28 +262,7 @@ var KonmikExtension = {
         }
 
         // Daftar chapter (terbaru di atas, sama seperti di situs)
-        const chapters = [];
-        const seenCh = new Set();
-        const cre = /<a[^>]+href="(https?:\/\/komiklab\.cc\/[^"]+-chapter-[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-        let cm;
-        while ((cm = cre.exec(html)) !== null) {
-            const link = cm[1];
-            if (seenCh.has(link)) continue;
-
-            const inner = cm[2];
-            const numM = inner.match(/<span class="chapternum">([\s\S]*?)<\/span>/i);
-            const dateM = inner.match(/<span class="chapterdate">([\s\S]*?)<\/span>/i);
-            // Hanya ambil tautan yang benar-benar item daftar chapter
-            if (!numM) continue;
-
-            seenCh.add(link);
-            chapters.push({
-                id: link,
-                title: stripTags(numM[1]),
-                endpoint: link,
-                date: dateM ? stripTags(dateM[1]) : ''
-            });
-        }
+        const chapters = parseChapters(html, url);
 
         return {
             title: title || 'Unknown Title',
