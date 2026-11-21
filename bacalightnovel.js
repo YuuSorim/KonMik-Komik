@@ -1,7 +1,7 @@
 // ID: ext_novel_bacalightnovel
 // NAME: BacaLightNovel
 // TYPE: novel
-// VERSION: 1.0.0
+// VERSION: 1.0.1
 // COLOR: #3B5998
 // ICON: https://www.google.com/s2/favicons?domain=bacalightnovel.co&sz=64
 // REFERER: https://bacalightnovel.co/
@@ -23,8 +23,34 @@ var KonmikExtension = {
     return await res.text();
   },
 
-  // Daftar novel / hasil pencarian (20 per halaman di katalog)
+  // Diagnostik: kalau gagal / kosong, tampilkan penyebabnya sebagai satu item di katalog.
+  // Setelah masalah beres, ubah debug menjadi false.
+  debug: true,
+
+  _debugItem(text) {
+    return [{
+      id: "debug", slug: "debug", title: text, cover: "",
+      source: this.sourceId, type: "Web Novel", status: "Ongoing"
+    }];
+  },
+
   async getList(page, query, filters) {
+    let url = "";
+    try {
+      const out = await this._getListInner(page, query, filters);
+      if (out.length === 0 && this.debug) {
+        const info = this._lastInfo || "";
+        return this._debugItem("[DEBUG] Kosong. " + info);
+      }
+      return out;
+    } catch (e) {
+      if (this.debug) return this._debugItem("[ERROR] " + (e && e.message ? e.message : String(e)));
+      throw e;
+    }
+  },
+
+  // Daftar novel / hasil pencarian (20 per halaman di katalog)
+  async _getListInner(page, query, filters) {
     page = page || 1;
     let url = "";
     if (query && query.trim().length > 0) {
@@ -42,6 +68,8 @@ var KonmikExtension = {
 
     const html = await this._fetchHtml(url);
     const flat = html.replace(/\s+/g, " ");
+    const tt = flat.match(/<title>([^<]*)<\/title>/i);
+    this._lastInfo = "url=" + url + " | panjang=" + html.length + " | title=" + (tt ? tt[1].substring(0, 60) : "(tidak ada)") + " | filters=" + JSON.stringify(filters || {}) + " | page=" + page;
 
     const novels = [];
     const seen = {};
