@@ -1,7 +1,7 @@
 // ID: ext_novel_bacalightnovel
 // NAME: BacaLightNovel
 // TYPE: novel
-// VERSION: 1.0.1
+// VERSION: 1.0.2
 // COLOR: #3B5998
 // ICON: https://www.google.com/s2/favicons?domain=bacalightnovel.co&sz=64
 // REFERER: https://bacalightnovel.co/
@@ -41,7 +41,8 @@ var KonmikExtension = {
       const out = await this._getListInner(page, query, filters);
       if (out.length === 0 && this.debug && (page || 1) === 1) {
         const info = this._lastInfo || "";
-        return this._debugItem("[DEBUG] Kosong. " + info);
+        const d = this._dbg || {};
+        return this._debugItem("[DEBUG] " + d.len + "B | " + d.title);
       }
       return out;
     } catch (e) {
@@ -71,6 +72,15 @@ var KonmikExtension = {
     const flat = html.replace(/\s+/g, " ");
     const tt = flat.match(/<title>([^<]*)<\/title>/i);
     this._lastInfo = "url=" + url + " | panjang=" + html.length + " | title=" + (tt ? tt[1].substring(0, 60) : "(tidak ada)") + " | filters=" + JSON.stringify(filters || {}) + " | page=" + page;
+    this._dbg = {
+      url: url, status: (this._last || {}).status, len: html.length,
+      title: tt ? tt[1].substring(0, 60) : "(tidak ada)",
+      article: (flat.match(/<article/gi) || []).length,
+      maindet: (flat.match(/maindet/gi) || []).length,
+      series: (flat.match(/\/series\//gi) || []).length,
+      head: flat.substring(0, 500),
+      mid: (function () { const i = flat.indexOf("/series/"); return i >= 0 ? flat.substring(Math.max(0, i - 200), i + 300) : "(tidak ada /series/)"; })()
+    };
 
     const novels = [];
     const seen = {};
@@ -111,6 +121,18 @@ var KonmikExtension = {
 
   // Detail novel + daftar bab (urut dari Bab 1 ke terbaru)
   async getDetail(slug) {
+    if (slug === "debug") {
+      const d = this._dbg || {};
+      const text = [
+        "url: " + d.url,
+        "status: " + d.status + " | panjang: " + d.len,
+        "title: " + d.title,
+        "jumlah <article>: " + d.article + " | 'maindet': " + d.maindet + " | '/series/': " + d.series,
+        "--- awal halaman ---", d.head,
+        "--- sekitar /series/ ---", d.mid
+      ].join("\n");
+      return { title: "DEBUG", cover: "", synopsis: text, author: "", type: "Web Novel", status: "Ongoing", genres: ["debug"], chapters: [] };
+    }
     if (slug.indexOf(this.sourceId + "_") === 0) {
       slug = slug.substring(this.sourceId.length + 1);
     }
