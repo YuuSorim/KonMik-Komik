@@ -1,7 +1,7 @@
 // ID: ext_mgkomik
 // NAME: MG Komik (ID)
 // TYPE: comic
-// VERSION: 1.0.2
+// VERSION: 1.1.0
 // COLOR: #E50914
 // ICON: https://www.google.com/s2/favicons?domain=mgkomik.cc&sz=64
 // REFERER: https://web1.mgkomik.cc/
@@ -13,7 +13,17 @@ const DOMAINS = [
     'https://web.mgkomik.cc',
 ];
 let BASE = DOMAINS[0];
-const UAS = [
+// ===== ISI DI SINI (jika situs menampilkan "Just a moment..." / Cloudflare) =====
+// 1) Buka situs di Chrome sampai komik tampil, tekan F12 -> tab Application ->
+//    Cookies -> pilih domain situs -> salin nilai "cf_clearance".
+// 2) Salin User-Agent browser yang sama (Console: navigator.userAgent).
+// 3) Tempel di bawah ini. Cookie ini kedaluwarsa, ganti jika error muncul lagi.
+// JANGAN upload file berisi cookie ke repositori publik.
+const COOKIE = '';       // contoh: 'cf_clearance=AbCdEf...'
+const USER_AGENT = '';   // contoh: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... Chrome/157.0.0.0 Safari/537.36'
+// ================================================================================
+
+const UAS = USER_AGENT ? [USER_AGENT] : [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36',
 ];
@@ -33,14 +43,14 @@ async function fetchSite(path, marker) {
         const host = d.replace('https://', '');
         for (let k = 0; k < UAS.length; k++) {
             try {
-                const res = await fetch(d + path, {
-                    headers: {
-                        'User-Agent': UAS[k],
-                        'Referer': d + '/',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                        'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-                    },
-                });
+                const headers = {
+                    'User-Agent': UAS[k],
+                    'Referer': d + '/',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+                };
+                if (COOKIE) headers['Cookie'] = COOKIE;
+                const res = await fetch(d + path, { headers: headers });
                 if (!res.ok) { errs.push(host + ' HTTP ' + res.status); continue; }
                 const text = await res.text();
                 if (marker && text.indexOf(marker) < 0) {
