@@ -1,7 +1,7 @@
 // ID: ext_lunarx
 // NAME: Lunar
 // TYPE: comic
-// VERSION: 1.0.1
+// VERSION: 1.0.2
 // COLOR: #7C3AED
 // ICON: https://www.google.com/s2/favicons?domain=lunarx.to&sz=64
 // REFERER: https://lunarx.to/
@@ -56,8 +56,66 @@ async function fetchJson(url) {
     const r = tolerantParse(text);
     if (r.ok) return r.value;
     const ctrl = (text.match(/[\u0000-\u001F]/g) || []).length;
-    _last.parse = { msg: r.msg, len: text.length, ctrl: ctrl, tail: text.substring(Math.max(0, text.length - 100)) };
-    throw new Error('Bukan JSON (' + r.msg + ') len=' + text.length + ' ctrl=' + ctrl + ' tail=' + text.substring(Math.max(0, text.length - 40)));
+    const bs = (text.match(/\\/g) || []).length;
+    _last.parse = {
+        msg: r.msg, len: text.length, ctrl: ctrl, backslash: bs,
+        tail: text.substring(Math.max(0, text.length - 100)),
+        sample: text.substring(0, 160)
+    };
+    // JSON rusak: kembalikan teks mentah, pemanggil memakai pembacaan cadangan (regex)
+    return { __raw: text };
+}
+
+// ---- Pembacaan cadangan berbasis regex (dipakai bila JSON.parse gagal) ----
+function rx(chunk, re) {
+    const m = chunk.match(re);
+    return m ? m[1] : '';
+}
+
+function listFromText(text) {
+    const parts = text.split('"alternative_titles"');
+    const out = [];
+    for (let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const slug = rx(p, /"slug"\s*:\s*"([^"]+)"/);
+        if (!slug) continue;
+        out.push({
+            slug: slug,
+            title: rx(p, /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/).replace(/\\"/g, '"'),
+            cover_url: rx(p, /"cover_url"\s*:\s*"([^"]*)"/),
+            publication_status: rx(p, /"publication_status"\s*:\s*"([^"]*)"/),
+            rating: rx(p, /"rating"\s*:\s*"([^"]*)"/)
+        });
+    }
+    return out;
+}
+
+function chaptersFromText(text) {
+    const parts = text.split('"average_rating"');
+    const out = [];
+    for (let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const chapter = rx(p, /"chapter"\s*:\s*"([^"]*)"/);
+        if (!chapter) continue;
+        const sub = rx(p, /"chapter_subnumber"\s*:\s*(\d+)/);
+        out.push({
+            chapter: chapter,
+            chapter_number: Number(rx(p, /"chapter_number"\s*:\s*(-?[\d.]+)/) || chapter),
+            chapter_subnumber: sub === '' ? null : Number(sub),
+            chapter_title: rx(p, /"chapter_title"\s*:\s*"((?:[^"\\]|\\.)*)"/),
+            language: rx(p, /"language"\s*:\s*"([^"]*)"/) || 'en',
+            uploaded_at: rx(p, /"uploaded_at"\s*:\s*"([^"]*)"/),
+            is_coming_soon: /"is_coming_soon"\s*:\s*true/.test(p)
+        });
+    }
+    return out;
+}
+
+function imagesFromText(text) {
+    const block = text.match(/"images"\s*:\s*\[([\s\S]*?)\]/);
+    if (!block) return [];
+    const urls = block[1].match(/https?:[^"\s,\]]+/g) || [];
+    return urls.map(function (u) { return u.replace(/\\+$/, '').replace(/\\\//g, '/'); });
 }
 
 function parseJsonField(v) {
@@ -170,7 +228,8 @@ var KonmikExtension = {
             url += '&q=' + q + '&query=' + q + '&search=' + q;
         }
         const json = await fetchJson(url);
-        const data = (json && json.manga) || [];
+        const data = json && json.__raw ? listFromText(json.__raw) : ((json && json.manga) || []);
+        if (json && json.__raw && data.length === 0) throw new Error('Bukan JSON dan pembacaan cadangan gagal');
 
         const list = [];
         for (const it of data) {
@@ -202,11 +261,19 @@ var KonmikExtension = {
         try {
             const html = await fetchText(SITE + '/manga/' + slug);
             meta = findMangaObject(html);
+            if (!meta) {
+                const t = rx(html, /<title>([^<]*)<\/title>/).replace(/\s*[-|].*$/, '').replace(/\s+(Manhwa|Manga|Manhua|Webtoon)$/i, '');
+                meta = {
+                    title: t,
+                    description: rx(html, /<meta name="description" content="([^"]*)"/).replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;/g, "'"),
+                    cover_url: rx(html, /property="og:image" content="([^"]*)"/).replace(/&amp;/g, '&')
+                };
+            }
         } catch (e) { /* lanjut tanpa metadata */ }
 
         // 2) Daftar chapter dari API
         const ch = await fetchJson(API + '/api/manga/' + slug);
-        const raw = (ch && ch.data) || [];
+        const raw = ch && ch.__raw ? chaptersFromText(ch.__raw) : ((ch && ch.data) || []);
 
         // pilih satu entri per nomor chapter, utamakan bahasa di LANG_PRIORITY
         const byKey = {};
@@ -274,7 +341,7 @@ var KonmikExtension = {
         for (const i of order) {
             try {
                 const json = await fetchJson(patterns[i]);
-                const imgs = json && json.data && json.data.images;
+                const imgs = json && json.__raw ? imagesFromText(json.__raw) : (json && json.data && json.data.images);
                 if (Array.isArray(imgs) && imgs.length > 0) {
                     _imgPattern = i;
                     return imgs.filter(function (u) { return typeof u === 'string' && u.length > 0; });
