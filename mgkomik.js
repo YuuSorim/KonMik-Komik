@@ -1,7 +1,7 @@
 // ID: ext_mgkomik
 // NAME: MG Komik (ID)
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.0.2
 // COLOR: #E50914
 // ICON: https://www.google.com/s2/favicons?domain=mgkomik.cc&sz=64
 // REFERER: https://web1.mgkomik.cc/
@@ -13,34 +13,47 @@ const DOMAINS = [
     'https://web.mgkomik.cc',
 ];
 let BASE = DOMAINS[0];
-const UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36';
+const UAS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36',
+];
 
 function pathOf(u) {
     // "/komik/slug/" atau URL penuh -> "/komik/slug/"
     return String(u || '').replace(/^https?:\/\/[^\/]+/i, '') || '/';
 }
 
-// Ambil halaman dari domain yang aktif; kalau gagal/tidak valid, coba domain lain.
+// Ambil halaman dari domain yang aktif; kalau gagal/tidak valid, coba domain & User-Agent lain.
 async function fetchSite(path, marker) {
     path = pathOf(path);
     const order = [BASE].concat(DOMAINS.filter(function (d) { return d !== BASE; }));
     const errs = [];
     for (let i = 0; i < order.length; i++) {
         const d = order[i];
-        try {
-            const res = await fetch(d + path, {
-                headers: { 'User-Agent': UA, 'Referer': d + '/', 'Accept': 'text/html,application/xhtml+xml' },
-            });
-            if (!res.ok) { errs.push(d.replace('https://', '') + ' HTTP ' + res.status); continue; }
-            const text = await res.text();
-            if (marker && text.indexOf(marker) < 0) {
-                errs.push(d.replace('https://', '') + ' halaman tidak dikenali (' + text.length + ' byte)');
-                continue;
+        const host = d.replace('https://', '');
+        for (let k = 0; k < UAS.length; k++) {
+            try {
+                const res = await fetch(d + path, {
+                    headers: {
+                        'User-Agent': UAS[k],
+                        'Referer': d + '/',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+                    },
+                });
+                if (!res.ok) { errs.push(host + ' HTTP ' + res.status); continue; }
+                const text = await res.text();
+                if (marker && text.indexOf(marker) < 0) {
+                    const title = clean((text.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [0, ''])[1]);
+                    const body = clean(text.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '')).substring(0, 140);
+                    errs.push(host + ' [' + text.length + ' byte] judul="' + title + '" isi="' + body + '"');
+                    continue;
+                }
+                BASE = d;
+                return text;
+            } catch (e) {
+                errs.push(host + ' ' + (e && e.message ? e.message : e));
             }
-            BASE = d;
-            return text;
-        } catch (e) {
-            errs.push(d.replace('https://', '') + ' ' + (e && e.message ? e.message : e));
         }
     }
     throw new Error('MG Komik gagal dimuat: ' + errs.join(' | '));
