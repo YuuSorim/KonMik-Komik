@@ -6,17 +6,44 @@
 // ICON: https://www.google.com/s2/favicons?domain=mgkomik.cc&sz=64
 // REFERER: https://web1.mgkomik.cc/
 
-// Jika domain berubah (web1 / id / web), cukup ganti BASE di bawah ini.
-const BASE = 'https://web1.mgkomik.cc';
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-    'Referer': BASE + '/',
-};
+// Domain dicoba berurutan. Jika situs pindah, tambahkan domain baru di daftar ini.
+const DOMAINS = [
+    'https://web1.mgkomik.cc',
+    'https://id.mgkomik.cc',
+    'https://web.mgkomik.cc',
+];
+let BASE = DOMAINS[0];
+const UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36';
 
-async function fetchHtml(url) {
-    const res = await fetch(url, { headers: HEADERS });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.text();
+function pathOf(u) {
+    // "/komik/slug/" atau URL penuh -> "/komik/slug/"
+    return String(u || '').replace(/^https?:\/\/[^\/]+/i, '') || '/';
+}
+
+// Ambil halaman dari domain yang aktif; kalau gagal/tidak valid, coba domain lain.
+async function fetchSite(path, marker) {
+    path = pathOf(path);
+    const order = [BASE].concat(DOMAINS.filter(function (d) { return d !== BASE; }));
+    const errs = [];
+    for (let i = 0; i < order.length; i++) {
+        const d = order[i];
+        try {
+            const res = await fetch(d + path, {
+                headers: { 'User-Agent': UA, 'Referer': d + '/', 'Accept': 'text/html,application/xhtml+xml' },
+            });
+            if (!res.ok) { errs.push(d.replace('https://', '') + ' HTTP ' + res.status); continue; }
+            const text = await res.text();
+            if (marker && text.indexOf(marker) < 0) {
+                errs.push(d.replace('https://', '') + ' halaman tidak dikenali (' + text.length + ' byte)');
+                continue;
+            }
+            BASE = d;
+            return text;
+        } catch (e) {
+            errs.push(d.replace('https://', '') + ' ' + (e && e.message ? e.message : e));
+        }
+    }
+    throw new Error('MG Komik gagal dimuat: ' + errs.join(' | '));
 }
 
 function absUrl(u) {
@@ -51,12 +78,12 @@ var KonmikExtension = {
         page = page || 1;
         let url;
         if (query && query.trim()) {
-            url = BASE + '/search/?q=' + encodeURIComponent(query.trim()) + '&page=' + page;
+            url = '/search/?q=' + encodeURIComponent(query.trim()) + '&page=' + page;
         } else {
             const order = filters && filters.sort === 'popular' ? 'trending' : 'latest';
-            url = BASE + '/komik/?filter=&order_by=' + order + '&page=' + page;
+            url = '/komik/?filter=&order_by=' + order + '&page=' + page;
         }
-        const html = await fetchHtml(url);
+        const html = await fetchSite(url, 'bottom-nav');
 
         // Setiap kartu diawali class="manga-card" (di halaman daftar berupa <div>,
         // di halaman pencarian berupa <a>), jadi pecah HTML berdasarkan itu.
@@ -86,13 +113,15 @@ var KonmikExtension = {
                 views: '-',
             });
         }
+        if (list.length === 0 && !(query && query.trim()) && page === 1) {
+            throw new Error('MG Komik: halaman terbuka tapi daftar komik tidak ditemukan (' + html.length + ' byte)');
+        }
         return { manga_list: list };
     },
 
     // ---------- DETAIL ----------
     async getDetail(id) {
-        const url = absUrl(id);
-        const html = await fetchHtml(url);
+        const html = await fetchSite(id, 'manga-title');
 
         const title = clean(firstMatch(/<h1[^>]*class=["']manga-title["'][^>]*>([\s\S]*?)<\/h1>/i, html)) || 'Tanpa Judul';
 
@@ -146,7 +175,7 @@ var KonmikExtension = {
 
     // ---------- GAMBAR CHAPTER ----------
     async getChapterImages(endpoint) {
-        const html = await fetchHtml(absUrl(endpoint));
+        const html = await fetchSite(endpoint, 'readingContent');
         const start = html.indexOf('id="readingContent"');
         const area = start >= 0 ? html.substring(start) : html;
         const re = /<img[^>]*?src=["']([^"']+)["'][^>]*?data-page=/gi;
