@@ -19,8 +19,10 @@ var KonmikExtension = {
 
   async _fetchHtml(url) {
     const res = await fetch(url, { headers: this._headers() });
-    if (!res.ok) throw new Error("HTTP " + res.status + " " + url);
-    return await res.text();
+    const body = await res.text();
+    this._last = { status: res.status, len: body.length, head: body.substring(0, 100).replace(/\s+/g, " ") };
+    if (!res.ok) throw new Error("HTTP " + res.status + " :: " + this._last.head);
+    return body;
   },
 
   // Diagnostik: kalau gagal / kosong, tampilkan penyebabnya sebagai satu item di katalog.
@@ -35,16 +37,15 @@ var KonmikExtension = {
   },
 
   async getList(page, query, filters) {
-    let url = "";
     try {
       const out = await this._getListInner(page, query, filters);
-      if (out.length === 0 && this.debug) {
+      if (out.length === 0 && this.debug && (page || 1) === 1) {
         const info = this._lastInfo || "";
         return this._debugItem("[DEBUG] Kosong. " + info);
       }
       return out;
     } catch (e) {
-      if (this.debug) return this._debugItem("[ERROR] " + (e && e.message ? e.message : String(e)));
+      if (this.debug && (page || 1) === 1) return this._debugItem("[ERROR] " + (e && e.message ? e.message : String(e)));
       throw e;
     }
   },
