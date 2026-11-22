@@ -1,7 +1,7 @@
 // ID: ext_thrive
 // NAME: Thrive.moe (ID)
 // TYPE: comic
-// VERSION: 1.4.0
+// VERSION: 1.4.1
 // COLOR: #7C5CFF
 // ICON: https://www.google.com/s2/favicons?domain=thrive.moe&sz=64
 // REFERER: https://thrive.moe/
@@ -24,46 +24,57 @@ const GENRES = [
 ];
 let cat = null;
 
-function resetCat() {
-    cat = { seen: {}, pages: {}, gi: -1, gp: 0, gmax: 0 };
+function newCat() {
+    return { seen: {}, pages: {}, gi: -1, gp: 0, gmax: 0 };
 }
 
-function takeNew(items) {
+function takeNew(st, items) {
     const out = [];
     for (const it of items) {
-        if (cat.seen[it.id]) continue;
-        cat.seen[it.id] = true;
+        if (st.seen[it.id]) continue;
+        st.seen[it.id] = true;
         out.push(it);
     }
     return out;
 }
 
-async function nextGenreChunk() {
+async function nextGenreChunk(st) {
     for (let attempt = 0; attempt < 10; attempt++) {
-        if (cat.gi < 0 || cat.gp >= cat.gmax) {
-            cat.gi++;
-            cat.gp = 1;
-            cat.gmax = 1;
+        if (st.gi < 0 || st.gp >= st.gmax) {
+            st.gi++;
+            st.gp = 1;
+            st.gmax = 1;
         } else {
-            cat.gp++;
+            st.gp++;
         }
-        if (cat.gi >= GENRES.length) return [];
-        const slug = GENRES[cat.gi];
+        if (st.gi >= GENRES.length) return [];
+        const slug = GENRES[st.gi];
         try {
-            const props = await getJson('/genre/' + slug + '.json?page=' + cat.gp + '&slug=' + slug);
+            const props = await getJson('/genre/' + slug + '.json?page=' + st.gp + '&slug=' + slug);
             const raw = props.__raw;
             const list = raw ? rawObjects(raw, 'data') : props.data;
             const max = raw ? parseInt(fld(raw, 'maxPage'), 10) : parseInt(props.maxPage, 10);
-            if (cat.gp === 1) cat.gmax = max > 0 ? max : 1;
-            const fresh = takeNew(toItems(list));
+            if (st.gp === 1) st.gmax = max > 0 ? max : 1;
+            const fresh = takeNew(st, toItems(list));
             if (fresh.length) return fresh;
         } catch (e) {
-            cat.gp = 0;
-            cat.gmax = 0; // genre tidak ada / gagal: lewati ke genre berikutnya
+            st.gp = 0;
+            st.gmax = 0; // genre tidak ada / gagal: lewati ke genre berikutnya
         }
     }
     return [];
 }
+
+// Halaman >= 2: tiap halaman diproses berurutan dan hasilnya disimpan sebagai promise,
+// sehingga panggilan ganda untuk halaman yang sama tidak saling merusak
+function genrePage(st, page) {
+    if (!st.pages[page]) {
+        const prev = page > 2 ? genrePage(st, page - 1) : Promise.resolve();
+        st.pages[page] = prev.then(() => nextGenreChunk(st));
+    }
+    return Promise.resolve(st.pages[page]);
+}
+
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
@@ -257,7 +268,7 @@ function toItems(arr) {
 
 var KonmikExtension = {
     async getList(page, query, filters) {
-        page = page || 1;
+        page = parseInt(page, 10) || 1;
         const q = query ? String(query).trim() : '';
         const sort = filters && filters.sort ? filters.sort : 'popular';
 
@@ -270,17 +281,15 @@ var KonmikExtension = {
 
         // Katalog: halaman 1 = halaman utama (populer/terbaru), halaman 2+ = halaman genre
         if (page === 1 || !cat) {
-            resetCat();
+            const st = newCat();
             const props = await getJson('/index.json');
             const key = sort === 'latest' ? 'terbaru' : 'terpopuler';
-            const home = takeNew(toItems(props.__raw ? rawObjects(props.__raw, key) : props[key]));
-            cat.pages[1] = home;
+            const home = takeNew(st, toItems(props.__raw ? rawObjects(props.__raw, key) : props[key]));
+            st.pages[1] = home;
+            cat = st;
             if (page === 1) return { manga_list: home };
         }
-        if (cat.pages[page]) return { manga_list: cat.pages[page] };
-        const chunk = await nextGenreChunk();
-        cat.pages[page] = chunk;
-        return { manga_list: chunk };
+        return { manga_list: await genrePage(cat, page) };
     },
 
     async getDetail(slug) {
