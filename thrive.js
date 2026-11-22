@@ -1,7 +1,7 @@
 // ID: ext_thrive
 // NAME: Thrive.moe (ID)
 // TYPE: comic
-// VERSION: 1.3.0
+// VERSION: 1.3.1
 // COLOR: #7C5CFF
 // ICON: https://www.google.com/s2/favicons?domain=thrive.moe&sz=64
 // REFERER: https://thrive.moe/
@@ -58,17 +58,38 @@ function fld(block, key) {
     return null;
 }
 
+// Ambil isi array mulai dari tanda '[' di posisi `open`, dengan memperhatikan string
+// (judul bisa mengandung ']' seperti "[Nikki-chou]", jadi indexOf(']') tidak aman)
+function arrayBody(raw, open) {
+    let depth = 0;
+    let inStr = false;
+    for (let i = open; i < raw.length; i++) {
+        const ch = raw.charAt(i);
+        if (inStr) {
+            if (ch === '\\') i++;
+            else if (ch === '"') inStr = false;
+        } else if (ch === '"') {
+            inStr = true;
+        } else if (ch === '[') {
+            depth++;
+        } else if (ch === ']') {
+            depth--;
+            if (depth === 0) return raw.slice(open + 1, i);
+        }
+    }
+    return raw.slice(open + 1);
+}
+
 // Ambil array string dari teks mentah: "key": ["a","b"]
 function rawStrings(raw, key, from) {
     const start = raw.indexOf('"' + key + '"', from || 0);
     if (start < 0) return [];
     const open = raw.indexOf('[', start);
-    const close = raw.indexOf(']', open);
-    if (open < 0 || close < 0) return [];
+    if (open < 0) return [];
     const out = [];
     const re = /"((?:[^"\\]|\\.)*)"/g;
     let m;
-    const body = raw.slice(open + 1, close);
+    const body = arrayBody(raw, open);
     while ((m = re.exec(body)) !== null) out.push(unq(m[1]));
     return out;
 }
@@ -79,9 +100,7 @@ function rawObjects(raw, key) {
     if (start < 0) return [];
     const open = raw.indexOf('[', start);
     if (open < 0) return [];
-    let end = raw.indexOf(']', open);
-    if (end < 0) end = raw.length;
-    const body = raw.slice(open + 1, end);
+    const body = arrayBody(raw, open);
     const blocks = body.match(/\{[^{}]*\}/g) || [];
     return blocks.map(b => ({
         id: fld(b, 'id'),
@@ -100,7 +119,7 @@ function rawDetail(raw) {
     const chapterlist = [];
     if (cl >= 0) {
         const open = raw.indexOf('[', cl);
-        const blocks = raw.slice(open + 1).match(/\{[^{}]*\}/g) || [];
+        const blocks = arrayBody(raw, open).match(/\{[^{}]*\}/g) || [];
         for (const b of blocks) {
             const cid = fld(b, 'chapter_id');
             if (!cid) continue;
