@@ -1,7 +1,7 @@
 // ID: ext_thrive
 // NAME: Thrive.moe (ID)
 // TYPE: comic
-// VERSION: 1.3.1
+// VERSION: 1.4.0
 // COLOR: #7C5CFF
 // ICON: https://www.google.com/s2/favicons?domain=thrive.moe&sz=64
 // REFERER: https://thrive.moe/
@@ -13,6 +13,57 @@
 const BASE = 'https://thrive.moe';
 const CDN = 'https://cdn.thrive.moe';
 const PAGE_SIZE = 24;
+
+// Halaman utama hanya memuat 50 populer / 121 terbaru. Sisanya diambil dari halaman genre
+// (/genre/<slug>, 100 judul per halaman), satu halaman genre per getList(). Judul ganda dibuang.
+const GENRES = [
+    'action', 'romance', 'comedy', 'drama', 'fantasy', 'adventure', 'slice-of-life', 'school-life',
+    'supernatural', 'harem', 'ecchi', 'mystery', 'psychological', 'horror', 'sci-fi', 'isekai',
+    'martial-arts', 'sports', 'historical', 'thriller', 'tragedy', 'mecha', 'girls-love', 'boys-love',
+    'shounen-ai', 'shoujo-ai', 'crime', 'magical-girls', 'superhero', 'medical', 'music', 'wuxia',
+];
+let cat = null;
+
+function resetCat() {
+    cat = { seen: {}, pages: {}, gi: -1, gp: 0, gmax: 0 };
+}
+
+function takeNew(items) {
+    const out = [];
+    for (const it of items) {
+        if (cat.seen[it.id]) continue;
+        cat.seen[it.id] = true;
+        out.push(it);
+    }
+    return out;
+}
+
+async function nextGenreChunk() {
+    for (let attempt = 0; attempt < 10; attempt++) {
+        if (cat.gi < 0 || cat.gp >= cat.gmax) {
+            cat.gi++;
+            cat.gp = 1;
+            cat.gmax = 1;
+        } else {
+            cat.gp++;
+        }
+        if (cat.gi >= GENRES.length) return [];
+        const slug = GENRES[cat.gi];
+        try {
+            const props = await getJson('/genre/' + slug + '.json?page=' + cat.gp + '&slug=' + slug);
+            const raw = props.__raw;
+            const list = raw ? rawObjects(raw, 'data') : props.data;
+            const max = raw ? parseInt(fld(raw, 'maxPage'), 10) : parseInt(props.maxPage, 10);
+            if (cat.gp === 1) cat.gmax = max > 0 ? max : 1;
+            const fresh = takeNew(toItems(list));
+            if (fresh.length) return fresh;
+        } catch (e) {
+            cat.gp = 0;
+            cat.gmax = 0; // genre tidak ada / gagal: lewati ke genre berikutnya
+        }
+    }
+    return [];
+}
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
@@ -217,12 +268,19 @@ var KonmikExtension = {
             return { manga_list: toItems(props.__raw ? rawObjects(props.__raw, 'res') : props.res) };
         }
 
-        // Katalog: halaman utama berisi terpopuler (50) dan terbaru (121); dipotong per halaman
-        const props = await getJson('/index.json');
-        const key = sort === 'latest' ? 'terbaru' : 'terpopuler';
-        const all = toItems(props.__raw ? rawObjects(props.__raw, key) : props[key]);
-        const start = (page - 1) * PAGE_SIZE;
-        return { manga_list: all.slice(start, start + PAGE_SIZE) };
+        // Katalog: halaman 1 = halaman utama (populer/terbaru), halaman 2+ = halaman genre
+        if (page === 1 || !cat) {
+            resetCat();
+            const props = await getJson('/index.json');
+            const key = sort === 'latest' ? 'terbaru' : 'terpopuler';
+            const home = takeNew(toItems(props.__raw ? rawObjects(props.__raw, key) : props[key]));
+            cat.pages[1] = home;
+            if (page === 1) return { manga_list: home };
+        }
+        if (cat.pages[page]) return { manga_list: cat.pages[page] };
+        const chunk = await nextGenreChunk();
+        cat.pages[page] = chunk;
+        return { manga_list: chunk };
     },
 
     async getDetail(slug) {
