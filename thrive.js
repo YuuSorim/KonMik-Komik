@@ -1,7 +1,7 @@
 // ID: ext_thrive
 // NAME: Thrive.moe (ID)
 // TYPE: comic
-// VERSION: 1.2.0
+// VERSION: 1.2.1
 // COLOR: #7C5CFF
 // ICON: https://www.google.com/s2/favicons?domain=thrive.moe&sz=64
 // REFERER: https://thrive.moe/
@@ -19,6 +19,8 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', '
 const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     'Referer': BASE + '/',
+    // Minta respons tanpa kompresi: respons gzip bisa terpotong di jembatan fetch aplikasi
+    'Accept-Encoding': 'identity',
 };
 
 let cachedBuildId = '';
@@ -39,6 +41,25 @@ async function getBuildId(force) {
     return cachedBuildId;
 }
 
+// JSON.parse yang tahan respons terpotong: buang bagian akhir yang rusak lalu tutup kurung
+function parseLoose(text) {
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        const closers = [']}}', '}}', ']}}}', '}'];
+        let end = text.length;
+        for (let i = 0; i < 6; i++) {
+            end = text.lastIndexOf('}', end - 1);
+            if (end < 0) break;
+            const head = text.slice(0, end + 1);
+            for (const c of closers) {
+                try { return JSON.parse(head + c); } catch (e2) { /* coba lagi */ }
+            }
+        }
+        throw new Error('JSON rusak/terpotong (panjang ' + text.length + '): ' + e.message);
+    }
+}
+
 // path contoh: '/title/<id>.json?id=<id>' atau '/index.json'
 async function getJson(path) {
     let lastErr;
@@ -50,7 +71,7 @@ async function getJson(path) {
         if (res.status === 404 && attempt === 0) { lastErr = new Error('HTTP 404: ' + path); continue; }
         if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + path);
         if (text.trim().charAt(0) !== '{') throw new Error('Respons bukan JSON: ' + text.slice(0, 120));
-        const json = JSON.parse(text);
+        const json = parseLoose(text);
         return json.pageProps || json;
     }
     throw lastErr || new Error('Gagal memuat ' + path);
