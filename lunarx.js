@@ -1,7 +1,7 @@
 // ID: ext_lunarx
 // NAME: Lunar
 // TYPE: comic
-// VERSION: 1.0.4
+// VERSION: 1.0.5
 // COLOR: #7C3AED
 // ICON: https://www.google.com/s2/favicons?domain=lunarx.to&sz=64
 // REFERER: https://lunarx.to/
@@ -155,10 +155,25 @@ function imagesFromText(text) {
     return urls.map(function (u) { return u.replace(/\\+$/, '').replace(/\\\//g, '/'); });
 }
 
-async function probeImage(url) {
+// Uji unduh satu gambar dengan set header tertentu; kembalikan ringkasan teks (status, tipe, ukuran, 4 byte awal).
+async function probeImage(url, headers) {
     try {
-        const res = await fetch(url, { headers: Object.assign({}, HEADERS, { 'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8' }) });
-        return 'HTTP ' + res.status;
+        const res = await fetch(url, { headers: headers });
+        let type = '?';
+        try {
+            if (res.headers && typeof res.headers.get === 'function') type = res.headers.get('content-type') || '?';
+            else if (res.headers) type = res.headers['content-type'] || res.headers['Content-Type'] || '?';
+        } catch (e) { /* abaikan */ }
+        let len = '?';
+        let head = '';
+        try {
+            const body = await res.text();
+            len = Math.round(body.length / 1024) + 'KB';
+            for (let i = 0; i < 4 && i < body.length; i++) {
+                head += (i ? ' ' : '') + body.charCodeAt(i).toString(16);
+            }
+        } catch (e) { /* abaikan */ }
+        return 'HTTP ' + res.status + ' ' + String(type).split(';')[0] + ' ' + len + ' [' + head + ']';
     } catch (e) {
         return 'ERR ' + String(e && e.message ? e.message : e).substring(0, 40);
     }
@@ -404,10 +419,19 @@ var KonmikExtension = {
                     _imgPattern = i;
                     const list = imgs.filter(function (u) { return typeof u === 'string' && u.length > 0; });
                     if (DEBUG) {
-                        const st = await probeImage(list[0]);
-                        const info = ['P' + (i + 1) + ' ok, ' + list.length + ' gambar', 'gambar1: ' + st, list[0].substring(list[0].length - 45)];
+                        const u0 = list[0];
+                        const full = await probeImage(u0, Object.assign({}, HEADERS, { 'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8' }));
+                        const refOnly = await probeImage(u0, { 'Referer': 'https://lunarx.to/' });
+                        const none = await probeImage(u0, {});
+                        const info = [
+                            'P' + (i + 1) + ' ok, ' + list.length + ' gambar',
+                            'A lengkap: ' + full,
+                            'B referer saja: ' + refOnly,
+                            'C tanpa header: ' + none,
+                            u0.substring(u0.length - 45)
+                        ];
                         return info.map(function (t) {
-                            return 'https://placehold.co/900x260/1a1a1a/ffffff.png?text=' + encodeURIComponent(t);
+                            return 'https://placehold.co/900x300/1a1a1a/ffffff.png?text=' + encodeURIComponent(t);
                         }).concat(list);
                     }
                     return list;
