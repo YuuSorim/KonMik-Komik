@@ -1,7 +1,7 @@
 // ID: ext_lunarx
 // NAME: Lunar
 // TYPE: comic
-// VERSION: 1.0.2
+// VERSION: 1.0.3
 // COLOR: #7C3AED
 // ICON: https://www.google.com/s2/favicons?domain=lunarx.to&sz=64
 // REFERER: https://lunarx.to/
@@ -19,6 +19,7 @@ const HEADERS = {
     'Origin': 'https://lunarx.to',
 };
 
+let _meta = {}; // slug -> data komik dari katalog (dipakai halaman detail, karena halaman web diblokir Cloudflare)
 let _imgPattern = -1; // pola URL gambar chapter yang berhasil (disimpan setelah sukses pertama)
 let _last = {};
 
@@ -234,12 +235,13 @@ var KonmikExtension = {
         const list = [];
         for (const it of data) {
             if (!it || !it.slug) continue;
+            _meta[it.slug] = it;
             list.push({
                 id: it.slug,
                 title: it.title || it.slug,
                 cover_url: it.cover_url || '',
                 latest_chapter: it.publication_status ? String(it.publication_status) : '',
-                rating: it.rating ? String(it.rating) : '-',
+                rating: '-',
                 views: '-'
             });
         }
@@ -256,20 +258,17 @@ var KonmikExtension = {
             };
         }
 
-        // 1) Metadata dari halaman detail (data tertanam di HTML)
-        let meta = null;
-        try {
-            const html = await fetchText(SITE + '/manga/' + slug);
-            meta = findMangaObject(html);
-            if (!meta) {
-                const t = rx(html, /<title>([^<]*)<\/title>/).replace(/\s*[-|].*$/, '').replace(/\s+(Manhwa|Manga|Manhua|Webtoon)$/i, '');
-                meta = {
-                    title: t,
-                    description: rx(html, /<meta name="description" content="([^"]*)"/).replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;/g, "'"),
-                    cover_url: rx(html, /property="og:image" content="([^"]*)"/).replace(/&amp;/g, '&')
-                };
-            }
-        } catch (e) { /* lanjut tanpa metadata */ }
+        // 1) Metadata: dari katalog yang sudah dibuka -> cari lewat API -> (terakhir) halaman web
+        let meta = _meta[slug] || null;
+        if (!meta) {
+            try { meta = await this._lookup(slug); } catch (e) { /* lanjut */ }
+        }
+        if (!meta) {
+            try {
+                const html = await fetchText(SITE + '/manga/' + slug);
+                if (!/Just a moment|Checking your browser/i.test(html)) meta = findMangaObject(html);
+            } catch (e) { /* lanjut tanpa metadata */ }
+        }
 
         // 2) Daftar chapter dari API
         const ch = await fetchJson(API + '/api/manga/' + slug);
@@ -291,7 +290,8 @@ var KonmikExtension = {
                 return nb - na;
             })
             .map(function (o) {
-                const id = slug + '|' + o.key + '|' + (o.c.language || 'en');
+                // pemisah "~" aman dari penyandian URL (tidak seperti "|")
+                const id = slug + '~' + o.key + '~' + (o.c.language || 'en');
                 return {
                     id: id,
                     title: o.c.chapter_title || ('Chapter ' + o.key),
@@ -312,17 +312,30 @@ var KonmikExtension = {
             description: description,
             author: (meta && meta.author) || '-',
             artist: (meta && (meta.artist || meta.author)) || '-',
-            rating: meta && meta.rating ? String(meta.rating) : '-',
+            rating: '-',
             views: '-',
             genres: genres,
             chapters: chapters
         };
     },
 
+    // Cari metadata satu komik lewat API pencarian (nama parameter pencarian belum terverifikasi)
+    async _lookup(slug) {
+        const q = encodeURIComponent(slug.replace(/-/g, ' '));
+        const json = await fetchJson(API + '/api/manga/search?page=1&limit=30&sort=relevance&order=desc&q=' + q + '&query=' + q + '&search=' + q);
+        const arr = json && json.__raw ? listFromText(json.__raw) : ((json && json.manga) || []);
+        for (const it of arr) {
+            if (it && it.slug) _meta[it.slug] = it;
+        }
+        return _meta[slug] || null;
+    },
+
     // ---------- GAMBAR CHAPTER ----------
-    // endpoint = "slug|nomor|bahasa"
+    // endpoint = "slug~nomor~bahasa" (juga menerima pemisah "|" atau "%7C")
     async getChapterImages(endpoint) {
-        const parts = endpoint.split('|');
+        let ep = String(endpoint);
+        try { ep = decodeURIComponent(ep); } catch (e) { /* biarkan */ }
+        const parts = ep.split(/[~|]/);
         const slug = parts[0];
         const num = parts[1];
         const lang = parts[2] || 'en';
@@ -337,7 +350,7 @@ var KonmikExtension = {
         if (_imgPattern >= 0) order.push(_imgPattern);
         for (let i = 0; i < patterns.length; i++) if (i !== _imgPattern) order.push(i);
 
-        let lastErr = null;
+        const notes = [];
         for (const i of order) {
             try {
                 const json = await fetchJson(patterns[i]);
@@ -346,8 +359,18 @@ var KonmikExtension = {
                     _imgPattern = i;
                     return imgs.filter(function (u) { return typeof u === 'string' && u.length > 0; });
                 }
-            } catch (e) { lastErr = e; }
+                notes.push('P' + (i + 1) + ': kosong');
+            } catch (e) {
+                notes.push('P' + (i + 1) + ': ' + String(e && e.message ? e.message : e).substring(0, 60));
+            }
         }
-        throw new Error('Gambar chapter tidak ditemukan' + (lastErr ? ' :: ' + lastErr.message : ''));
+        if (DEBUG) {
+            // Pembaca hanya menampilkan "Gagal memuat gambar", jadi alasan ditampilkan sebagai gambar teks.
+            const lines = ['slug=' + slug + ' no=' + num + ' lang=' + lang].concat(notes);
+            return lines.map(function (t) {
+                return 'https://placehold.co/900x420/1a1a1a/ffffff.png?text=' + encodeURIComponent(t);
+            });
+        }
+        throw new Error('Gambar chapter tidak ditemukan :: ' + notes.join(' | '));
     }
 };
