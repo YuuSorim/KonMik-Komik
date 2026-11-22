@@ -1,7 +1,7 @@
 // ID: ext_lunarx
 // NAME: Lunar
 // TYPE: comic
-// VERSION: 1.0.3
+// VERSION: 1.0.4
 // COLOR: #7C3AED
 // ICON: https://www.google.com/s2/favicons?domain=lunarx.to&sz=64
 // REFERER: https://lunarx.to/
@@ -73,19 +73,55 @@ function rx(chunk, re) {
     return m ? m[1] : '';
 }
 
+// Urutan kunci di data situs alfabetis, jadi tiap field dipotong sampai kunci berikutnya.
+// Cara ini tetap jalan walau tanda kutip bersarang (judul alternatif, sinopsis) rusak.
+function between(chunk, startKey, endKeys) {
+    const i = chunk.indexOf('"' + startKey + '":');
+    if (i < 0) return '';
+    const from = i + startKey.length + 3;
+    let end = -1;
+    // kunci penutup yang paling awal muncul (sebagian kunci opsional, mis. theme_settings)
+    for (const k of endKeys) {
+        const j = chunk.indexOf(',"' + k + '":', from);
+        if (j >= 0 && (end < 0 || j < end)) end = j;
+    }
+    let v = (end < 0 ? chunk.substring(from) : chunk.substring(from, end)).trim();
+    if (v.charAt(0) === '"') v = v.substring(1);
+    if (v.charAt(v.length - 1) === '"') v = v.substring(0, v.length - 1);
+    return v;
+}
+
+function unescapeText(v) {
+    return v
+        .replace(/\\r\\n|\\n/g, '\n')
+        .replace(/\\u([0-9a-fA-F]{4})/g, function (_, h) { return String.fromCharCode(parseInt(h, 16)); })
+        .replace(/\\"/g, '"')
+        .replace(/\\\//g, '/')
+        .replace(/\\\\/g, '\\');
+}
+
 function listFromText(text) {
     const parts = text.split('"alternative_titles"');
     const out = [];
     for (let i = 1; i < parts.length; i++) {
-        const p = parts[i];
-        const slug = rx(p, /"slug"\s*:\s*"([^"]+)"/);
+        const p = '"alternative_titles"' + parts[i];
+        const slug = between(p, 'slug', ['theme_settings', 'themecolor', 'themes', 'title']);
         if (!slug) continue;
+        const genreRaw = between(p, 'genres', ['is_official', 'manga_id']).replace(/\\/g, '');
+        const genres = [];
+        const gRe = /"([^"]+)"/g;
+        let g;
+        while ((g = gRe.exec(genreRaw)) !== null) genres.push(g[1]);
         out.push({
             slug: slug,
-            title: rx(p, /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/).replace(/\\"/g, '"'),
-            cover_url: rx(p, /"cover_url"\s*:\s*"([^"]*)"/),
-            publication_status: rx(p, /"publication_status"\s*:\s*"([^"]*)"/),
-            rating: rx(p, /"rating"\s*:\s*"([^"]*)"/)
+            title: unescapeText(between(p, 'title', ['tl_username', 'trailer', 'translated_languages', 'user_id'])),
+            cover_url: between(p, 'cover_url', ['demographic', 'description', 'genres']),
+            description: unescapeText(between(p, 'description', ['genres', 'is_official', 'manga_id'])),
+            genres: genres,
+            author: unescapeText(between(p, 'author', ['banner_url', 'characters', 'content_level', 'cover_url'])),
+            artist: unescapeText(between(p, 'artist', ['author', 'banner_url'])),
+            publication_status: between(p, 'publication_status', ['publication_year', 'publisher', 'rating']),
+            rating: ''
         });
     }
     return out;
@@ -117,6 +153,15 @@ function imagesFromText(text) {
     if (!block) return [];
     const urls = block[1].match(/https?:[^"\s,\]]+/g) || [];
     return urls.map(function (u) { return u.replace(/\\+$/, '').replace(/\\\//g, '/'); });
+}
+
+async function probeImage(url) {
+    try {
+        const res = await fetch(url, { headers: Object.assign({}, HEADERS, { 'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8' }) });
+        return 'HTTP ' + res.status;
+    } catch (e) {
+        return 'ERR ' + String(e && e.message ? e.message : e).substring(0, 40);
+    }
 }
 
 function parseJsonField(v) {
@@ -357,7 +402,15 @@ var KonmikExtension = {
                 const imgs = json && json.__raw ? imagesFromText(json.__raw) : (json && json.data && json.data.images);
                 if (Array.isArray(imgs) && imgs.length > 0) {
                     _imgPattern = i;
-                    return imgs.filter(function (u) { return typeof u === 'string' && u.length > 0; });
+                    const list = imgs.filter(function (u) { return typeof u === 'string' && u.length > 0; });
+                    if (DEBUG) {
+                        const st = await probeImage(list[0]);
+                        const info = ['P' + (i + 1) + ' ok, ' + list.length + ' gambar', 'gambar1: ' + st, list[0].substring(list[0].length - 45)];
+                        return info.map(function (t) {
+                            return 'https://placehold.co/900x260/1a1a1a/ffffff.png?text=' + encodeURIComponent(t);
+                        }).concat(list);
+                    }
+                    return list;
                 }
                 notes.push('P' + (i + 1) + ': kosong');
             } catch (e) {
