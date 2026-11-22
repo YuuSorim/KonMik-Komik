@@ -1,7 +1,7 @@
 // ID: ext_thrive
 // NAME: Thrive.moe (ID)
 // TYPE: comic
-// VERSION: 1.2.1
+// VERSION: 1.3.0
 // COLOR: #7C5CFF
 // ICON: https://www.google.com/s2/favicons?domain=thrive.moe&sz=64
 // REFERER: https://thrive.moe/
@@ -41,23 +41,92 @@ async function getBuildId(force) {
     return cachedBuildId;
 }
 
-// JSON.parse yang tahan respons terpotong: buang bagian akhir yang rusak lalu tutup kurung
-function parseLoose(text) {
-    try {
-        return JSON.parse(text);
-    } catch (e) {
-        const closers = [']}}', '}}', ']}}}', '}'];
-        let end = text.length;
-        for (let i = 0; i < 6; i++) {
-            end = text.lastIndexOf('}', end - 1);
-            if (end < 0) break;
-            const head = text.slice(0, end + 1);
-            for (const c of closers) {
-                try { return JSON.parse(head + c); } catch (e2) { /* coba lagi */ }
-            }
+// ---- Fallback tanpa JSON.parse -------------------------------------------
+// Beberapa lingkungan menggagalkan JSON.parse pada respons yang valid, jadi
+// kalau parse gagal, data dibaca langsung dari teks mentah dengan RegExp.
+function unq(str) {
+    if (str === null || str === undefined) return '';
+    try { return JSON.parse('"' + str + '"'); } catch (e) { return String(str).replace(/\\"/g, '"').replace(/\\n/g, '\n'); }
+}
+
+// Ambil nilai string/angka dari satu blok objek: "key": "nilai"
+function fld(block, key) {
+    const m = block.match(new RegExp('"' + key + '"\\s*:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|(-?\\d+(?:\\.\\d+)?)|(null|true|false))'));
+    if (!m) return null;
+    if (m[1] !== undefined) return unq(m[1]);
+    if (m[2] !== undefined) return m[2];
+    return null;
+}
+
+// Ambil array string dari teks mentah: "key": ["a","b"]
+function rawStrings(raw, key, from) {
+    const start = raw.indexOf('"' + key + '"', from || 0);
+    if (start < 0) return [];
+    const open = raw.indexOf('[', start);
+    const close = raw.indexOf(']', open);
+    if (open < 0 || close < 0) return [];
+    const out = [];
+    const re = /"((?:[^"\\]|\\.)*)"/g;
+    let m;
+    const body = raw.slice(open + 1, close);
+    while ((m = re.exec(body)) !== null) out.push(unq(m[1]));
+    return out;
+}
+
+// Ambil daftar objek datar dari array bernama `key` (mis. terbaru, terpopuler, res)
+function rawObjects(raw, key) {
+    const start = raw.indexOf('"' + key + '"');
+    if (start < 0) return [];
+    const open = raw.indexOf('[', start);
+    if (open < 0) return [];
+    let end = raw.indexOf(']', open);
+    if (end < 0) end = raw.length;
+    const body = raw.slice(open + 1, end);
+    const blocks = body.match(/\{[^{}]*\}/g) || [];
+    return blocks.map(b => ({
+        id: fld(b, 'id'),
+        title: fld(b, 'title'),
+        cover: fld(b, 'cover'),
+        chapter_id: fld(b, 'chapter_id'),
+        chapter_number: fld(b, 'chapter_number'),
+    }));
+}
+
+function rawDetail(raw) {
+    const cl = raw.indexOf('"chapterlist"');
+    const head = cl >= 0 ? raw.slice(0, cl) : raw;
+    const tm = head.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"alt_title"/);
+    const artistIdx = head.indexOf('"artist"');
+    const chapterlist = [];
+    if (cl >= 0) {
+        const open = raw.indexOf('[', cl);
+        const blocks = raw.slice(open + 1).match(/\{[^{}]*\}/g) || [];
+        for (const b of blocks) {
+            const cid = fld(b, 'chapter_id');
+            if (!cid) continue;
+            chapterlist.push({
+                chapter_id: cid,
+                created_at: fld(b, 'created_at'),
+                chapter_title: fld(b, 'chapter_title'),
+                chapter_number: fld(b, 'chapter_number'),
+            });
         }
-        throw new Error('JSON rusak/terpotong (panjang ' + text.length + '): ' + e.message);
     }
+    return {
+        title: tm ? unq(tm[1]) : '',
+        desc_ID: fld(head, 'desc_ID'),
+        desc: { en: '' },
+        image: fld(head, 'image'),
+        author: rawStrings(head, 'author'),
+        artist: rawStrings(head, 'artist'),
+        tags: rawStrings(head, 'tags', artistIdx < 0 ? 0 : artistIdx),
+        chapterlist: chapterlist,
+    };
+}
+
+function rawRead(raw) {
+    const arr = rawStrings(raw, 'image');
+    return { image: arr, prefix: fld(raw, 'prefix') };
 }
 
 // path contoh: '/title/<id>.json?id=<id>' atau '/index.json'
@@ -71,7 +140,9 @@ async function getJson(path) {
         if (res.status === 404 && attempt === 0) { lastErr = new Error('HTTP 404: ' + path); continue; }
         if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + path);
         if (text.trim().charAt(0) !== '{') throw new Error('Respons bukan JSON: ' + text.slice(0, 120));
-        const json = parseLoose(text);
+        let json = null;
+        try { json = JSON.parse(text); } catch (e) { json = null; }
+        if (!json) return { __raw: text };
         return json.pageProps || json;
     }
     throw lastErr || new Error('Gagal memuat ' + path);
@@ -124,19 +195,21 @@ var KonmikExtension = {
         if (q) {
             if (page > 1) return { manga_list: [] };
             const props = await getJson('/search.json?q=' + encodeURIComponent(q));
-            return { manga_list: toItems(props.res) };
+            return { manga_list: toItems(props.__raw ? rawObjects(props.__raw, 'res') : props.res) };
         }
 
         // Katalog: halaman utama berisi terpopuler (50) dan terbaru (121); dipotong per halaman
         const props = await getJson('/index.json');
-        const all = toItems(sort === 'latest' ? props.terbaru : props.terpopuler);
+        const key = sort === 'latest' ? 'terbaru' : 'terpopuler';
+        const all = toItems(props.__raw ? rawObjects(props.__raw, key) : props[key]);
         const start = (page - 1) * PAGE_SIZE;
         return { manga_list: all.slice(start, start + PAGE_SIZE) };
     },
 
     async getDetail(slug) {
         const id = extractId(slug);
-        const p = await getJson('/title/' + id + '.json?id=' + id);
+        let p = await getJson('/title/' + id + '.json?id=' + id);
+        if (p.__raw) p = rawDetail(p.__raw);
 
         const desc = p.desc_ID || (p.desc && (p.desc.id || p.desc.en)) || 'Tidak ada deskripsi.';
         const authors = (p.author || []).join(', ');
@@ -177,7 +250,8 @@ var KonmikExtension = {
 
     async getChapterImages(endpoint) {
         const id = extractId(endpoint);
-        const p = await getJson('/read/' + id + '.json?id=' + id);
+        let p = await getJson('/read/' + id + '.json?id=' + id);
+        if (p.__raw) p = rawRead(p.__raw);
         const prefix = p.prefix;
         return (p.image || []).map(f => CDN + '/data/' + prefix + '/' + f);
     },
