@@ -1,53 +1,27 @@
 // ID: ext_thrive
 // NAME: Thrive.moe (ID)
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.2.0
 // COLOR: #7C5CFF
 // ICON: https://www.google.com/s2/favicons?domain=thrive.moe&sz=64
 // REFERER: https://thrive.moe/
 
-// thrive.moe adalah front-end Next.js yang "Powered by MangaDex":
-// ID judul (/title/<uuid>) dan ID bab (/read/<uuid>) adalah UUID MangaDex,
-// sedangkan daftar bab dirender di sisi klien (tidak ada di HTML).
-// Karena itu ekstensi ini membaca data lewat API MangaDex (JSON), bukan RegExp HTML,
-// dan hanya menampilkan konten berbahasa Indonesia seperti di thrive.moe.
+// thrive.moe memakai Next.js. Datanya diambil dari file JSON
+// /_next/data/<buildId>/... (buildId berubah tiap deploy, jadi diambil otomatis
+// dari halaman utama). Tidak memakai api.mangadex.org (diblokir ISP).
 
-const API = 'https://api.mangadex.org';
-const COVER_CDN = 'https://cdn.thrive.moe/covers';
-const LANG = 'id';
+const BASE = 'https://thrive.moe';
+const CDN = 'https://cdn.thrive.moe';
 const PAGE_SIZE = 24;
-const RATINGS = ['safe', 'suggestive', 'erotica'];
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-    'Accept': 'application/json',
-    'Referer': 'https://thrive.moe/',
+    'Referer': BASE + '/',
 };
 
-function qs(params) {
-    const parts = [];
-    for (const key in params) {
-        const v = params[key];
-        if (v === undefined || v === null || v === '') continue;
-        if (Array.isArray(v)) {
-            for (const item of v) {
-                parts.push(encodeURIComponent(key + '[]') + '=' + encodeURIComponent(item));
-            }
-        } else {
-            parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(v));
-        }
-    }
-    return parts.join('&');
-}
-
-async function api(path, params) {
-    const url = API + path + (params ? '?' + qs(params) : '');
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error('HTTP ' + res.status + ' - ' + path);
-    return JSON.parse(await res.text());
-}
+let cachedBuildId = '';
 
 function extractId(str) {
     const m = String(str || '').match(UUID_RE);
@@ -55,39 +29,38 @@ function extractId(str) {
     return m[0].toLowerCase();
 }
 
-function pickTitle(attrs) {
-    const t = attrs.title || {};
-    if (t[LANG]) return t[LANG];
-    if (t.en) return t.en;
-    const first = Object.values(t)[0];
-    if (first) return first;
-    for (const alt of attrs.altTitles || []) {
-        const v = alt[LANG] || alt.en;
-        if (v) return v;
+async function getBuildId(force) {
+    if (cachedBuildId && !force) return cachedBuildId;
+    const res = await fetch(BASE + '/', { headers });
+    const html = await res.text();
+    const m = html.match(/"buildId"\s*:\s*"([^"]+)"/);
+    if (!m) throw new Error('buildId tidak ditemukan (HTTP ' + res.status + '): ' + html.slice(0, 120));
+    cachedBuildId = m[1];
+    return cachedBuildId;
+}
+
+// path contoh: '/title/<id>.json?id=<id>' atau '/index.json'
+async function getJson(path) {
+    let lastErr;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const build = await getBuildId(attempt > 0);
+        const url = BASE + '/_next/data/' + build + path;
+        const res = await fetch(url, { headers });
+        const text = await res.text();
+        if (res.status === 404 && attempt === 0) { lastErr = new Error('HTTP 404: ' + path); continue; }
+        if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + path);
+        if (text.trim().charAt(0) !== '{') throw new Error('Respons bukan JSON: ' + text.slice(0, 120));
+        const json = JSON.parse(text);
+        return json.pageProps || json;
     }
-    return 'Tanpa Judul';
+    throw lastErr || new Error('Gagal memuat ' + path);
 }
 
-function pickDescription(attrs) {
-    const d = attrs.description || {};
-    return (d[LANG] || d.en || Object.values(d)[0] || 'Tidak ada deskripsi.').trim();
-}
-
-function findRel(rels, type) {
-    return (rels || []).filter(r => r.type === type);
-}
-
-function coverUrl(mangaId, rels) {
-    const cover = findRel(rels, 'cover_art')[0];
-    const file = cover && cover.attributes && cover.attributes.fileName;
-    return file ? COVER_CDN + '/' + mangaId + '/' + file + '.512.jpg' : '';
-}
-
-function compact(n) {
-    if (n === undefined || n === null) return '-';
-    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
-    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
-    return String(n);
+function coverFrom(mangaId, url) {
+    if (!url) return '';
+    if (url.indexOf('cdn.thrive.moe') !== -1) return url;
+    const file = String(url).split('?')[0].split('/').pop();
+    return file ? CDN + '/covers/' + mangaId + '/' + file + '.512.jpg' : url;
 }
 
 function formatDate(iso) {
@@ -96,18 +69,28 @@ function formatDate(iso) {
     return parseInt(m[3], 10) + ' ' + MONTHS[parseInt(m[2], 10) - 1] + ' ' + m[1];
 }
 
-async function fetchStats(ids) {
-    try {
-        const data = await api('/statistics/manga', { manga: ids });
-        return data.statistics || {};
-    } catch (e) {
-        return {};
-    }
+function toItem(n) {
+    const id = String(n.id).toLowerCase();
+    const num = n.chapter_number;
+    return {
+        id: id,
+        title: String(n.title).trim(),
+        cover_url: coverFrom(id, n.cover || ''),
+        latest_chapter: num ? 'Ch. ' + num : '',
+        rating: '-',
+        views: '-',
+    };
 }
 
-function ratingOf(stat) {
-    const avg = stat && stat.rating && stat.rating.average;
-    return avg ? avg.toFixed(1) : '-';
+function toItems(arr) {
+    const out = [];
+    const seen = {};
+    for (const n of arr || []) {
+        if (!n || !n.id || !n.title || seen[n.id]) continue;
+        seen[n.id] = true;
+        out.push(toItem(n));
+    }
+    return out;
 }
 
 var KonmikExtension = {
@@ -116,125 +99,65 @@ var KonmikExtension = {
         const q = query ? String(query).trim() : '';
         const sort = filters && filters.sort ? filters.sort : 'popular';
 
-        const params = {
-            limit: PAGE_SIZE,
-            offset: (page - 1) * PAGE_SIZE,
-            includes: ['cover_art'],
-            availableTranslatedLanguage: [LANG],
-            contentRating: RATINGS,
-            hasAvailableChapters: 'true',
-        };
+        // Pencarian: /search?q=... (hasil di pageProps.res, tanpa paginasi)
         if (q) {
-            params.title = q;
-            params['order[relevance]'] = 'desc';
-        } else if (sort === 'latest') {
-            params['order[latestUploadedChapter]'] = 'desc';
-        } else {
-            params['order[followedCount]'] = 'desc';
+            if (page > 1) return { manga_list: [] };
+            const props = await getJson('/search.json?q=' + encodeURIComponent(q));
+            return { manga_list: toItems(props.res) };
         }
 
-        const data = await api('/manga', params);
-        const items = data.data || [];
-        const stats = await fetchStats(items.map(i => i.id));
-
-        const mangaList = items.map(item => {
-            const a = item.attributes || {};
-            const s = stats[item.id];
-            return {
-                id: item.id,
-                title: pickTitle(a),
-                cover_url: coverUrl(item.id, item.relationships),
-                latest_chapter: a.lastChapter ? 'Ch. ' + a.lastChapter : '',
-                rating: ratingOf(s),
-                views: compact(s && s.follows),
-            };
-        });
-        return { manga_list: mangaList };
+        // Katalog: halaman utama berisi terpopuler (50) dan terbaru (121); dipotong per halaman
+        const props = await getJson('/index.json');
+        const all = toItems(sort === 'latest' ? props.terbaru : props.terpopuler);
+        const start = (page - 1) * PAGE_SIZE;
+        return { manga_list: all.slice(start, start + PAGE_SIZE) };
     },
 
     async getDetail(slug) {
         const id = extractId(slug);
-        const [detail, stats] = await Promise.all([
-            api('/manga/' + id, { includes: ['cover_art', 'author', 'artist'] }),
-            fetchStats([id]),
-        ]);
-        const item = detail.data;
-        const a = item.attributes || {};
-        const rels = item.relationships || [];
+        const p = await getJson('/title/' + id + '.json?id=' + id);
 
-        const authors = findRel(rels, 'author').map(r => r.attributes && r.attributes.name).filter(Boolean);
-        const artists = findRel(rels, 'artist').map(r => r.attributes && r.attributes.name).filter(Boolean);
-        const genres = (a.tags || [])
-            .map(t => t.attributes && t.attributes.name && (t.attributes.name.en || Object.values(t.attributes.name)[0]))
-            .filter(Boolean);
+        const desc = p.desc_ID || (p.desc && (p.desc.id || p.desc.en)) || 'Tidak ada deskripsi.';
+        const authors = (p.author || []).join(', ');
+        const artists = (p.artist || []).join(', ');
 
-        // Ambil semua bab berbahasa Indonesia (maks 500 per request)
         const chapters = [];
         const seen = {};
-        let offset = 0;
-        let total = 1;
-        let guard = 0;
-        while (offset < total && guard < 10) {
-            const feed = await api('/manga/' + id + '/feed', {
-                translatedLanguage: [LANG],
-                contentRating: RATINGS,
-                includeExternalUrl: 0,
-                includeEmptyPages: 0,
-                limit: 500,
-                offset: offset,
-                'order[chapter]': 'desc',
-            });
-            total = feed.total || 0;
-            const rows = feed.data || [];
-            if (rows.length === 0) break;
-            for (const ch of rows) {
-                const c = ch.attributes || {};
-                if (c.pages === 0) continue;
-                // Satu nomor bab bisa diunggah beberapa grup: ambil yang pertama saja
-                const key = c.chapter ? (c.volume || '') + '|' + c.chapter : ch.id;
-                if (seen[key]) continue;
-                seen[key] = true;
-
-                let title;
-                if (c.chapter) {
-                    title = 'Chapter ' + c.chapter + (c.title ? ' - ' + c.title : '');
-                } else {
-                    title = c.title || 'Oneshot';
-                }
-                chapters.push({
-                    id: ch.id,
-                    title: title,
-                    endpoint: ch.id,
-                    date: formatDate(c.readableAt || c.publishAt),
-                });
+        for (const c of p.chapterlist || []) {
+            const key = c.chapter_number ? String(c.chapter_number) : c.chapter_id;
+            if (seen[key]) continue;
+            seen[key] = true;
+            let title;
+            if (c.chapter_number) {
+                title = 'Chapter ' + c.chapter_number + (c.chapter_title ? ' - ' + c.chapter_title : '');
+            } else {
+                title = c.chapter_title || 'Oneshot';
             }
-            offset += rows.length;
-            guard++;
+            chapters.push({
+                id: c.chapter_id,
+                title: title,
+                endpoint: c.chapter_id,
+                date: formatDate(c.created_at),
+            });
         }
 
-        const s = stats[id];
-        const author = authors.join(', ') || 'Unknown';
         return {
-            title: pickTitle(a),
-            cover_url: coverUrl(id, rels),
-            description: pickDescription(a),
-            author: author,
-            artist: artists.join(', ') || author,
-            rating: ratingOf(s),
-            views: compact(s && s.follows),
-            genres: genres.length ? genres : ['Manga'],
+            title: p.title || 'Tanpa Judul',
+            cover_url: coverFrom(id, p.image),
+            description: String(desc).trim(),
+            author: authors || 'Unknown',
+            artist: artists || authors || 'Unknown',
+            rating: '-',
+            views: '-',
+            genres: (p.tags && p.tags.length) ? p.tags : ['Manga'],
             chapters: chapters,
         };
     },
 
     async getChapterImages(endpoint) {
         const id = extractId(endpoint);
-        const data = await api('/at-home/server/' + id);
-        const base = data.baseUrl;
-        const ch = data.chapter || {};
-        if (ch.data && ch.data.length) {
-            return ch.data.map(f => base + '/data/' + ch.hash + '/' + f);
-        }
-        return (ch.dataSaver || []).map(f => base + '/data-saver/' + ch.hash + '/' + f);
+        const p = await getJson('/read/' + id + '.json?id=' + id);
+        const prefix = p.prefix;
+        return (p.image || []).map(f => CDN + '/data/' + prefix + '/' + f);
     },
 };
