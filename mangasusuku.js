@@ -1,7 +1,7 @@
 // ID: ext_mangasusuku
 // NAME: Mangasusu
 // TYPE: comic
-// VERSION: 1.0.1
+// VERSION: 1.0.2
 // COLOR: #3367D6
 // ICON: https://mangasusuku.com/wp-content/uploads/2021/04/saber.png
 // REFERER: https://mangasusuku.com/
@@ -23,11 +23,22 @@ const headers = {
 // 1. HELPER
 // ==========================================
 
+let LAST = { status: 0, len: 0 };
+
 async function fetchHtml(url) {
     const res = await fetch(url, { headers });
     const status = res.status || 200;
+    LAST = { status: status, len: 0 };
     if (status !== 200) throw new Error(`HTTP ${status} untuk ${url}`);
-    return await res.text();
+    const text = await res.text();
+    LAST.len = text.length;
+    return text;
+}
+
+// Mode diagnosis: tampilkan pesan error sebagai gambar supaya terlihat di layar pembaca
+const DEBUG_IMAGE_ERRORS = true;
+function debugImage(msg) {
+    return 'https://placehold.co/900x420/222222/ffffff/png?text=' + encodeURIComponent('v1.0.2\n' + msg);
 }
 
 function decodeEntities(s) {
@@ -279,6 +290,16 @@ var KonmikExtension = {
 
     // -- Gambar halaman chapter --
     async getChapterImages(chapterId) {
+        try {
+            return await this._getChapterImagesReal(chapterId);
+        } catch (e) {
+            if (!DEBUG_IMAGE_ERRORS) throw e;
+            const m = (e && e.message ? e.message : String(e)).substring(0, 90);
+            return [debugImage('ERR st=' + LAST.status + ' len=' + LAST.len + '\n' + m)];
+        }
+    },
+
+    async _getChapterImagesReal(chapterId) {
         const url = chapterId.startsWith('http') ? chapterId : `${BASE}/${chapterId.replace(/^\/+/, '')}`;
         const html = await fetchHtml(url);
         const images = [];
@@ -324,6 +345,6 @@ var KonmikExtension = {
         if (images.length > 0) return images;
 
         // Tidak ada gambar: lempar error supaya reader tidak loading selamanya
-        throw new Error('Gambar chapter tidak ditemukan (panjang HTML ' + html.length + ')');
+        throw new Error('Gambar tidak ditemukan; id=' + chapterId.substring(0, 60));
     }
 };
