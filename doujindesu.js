@@ -1,7 +1,7 @@
 // ID: ext_doujindesu
 // NAME: Doujindesu
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.0.1
 // COLOR: #E91E63
 // ICON: https://pic.desu.xxx/content/web/1217a30e-c660-4212-9d80-548df7aa166d.webp
 // REFERER: https://doujin.desu.xxx/
@@ -14,6 +14,11 @@ const KEY_PERIOD = 3600000; // kunci enkripsi situs berganti tiap 1 jam
 // yang cocok dipilih otomatis saat respons pertama berhasil didekripsi.
 const H0_CANDIDATES = [2467384909, 3922124140, 1081896075];
 let _h0 = null;
+
+// Tipe yang diminta ke katalog. Situs menampilkan doujinshi + manga; manhwa/manhua ditambahkan
+// dan jika server menolak (error/kosong) otomatis turun ke daftar yang lebih pendek.
+const TYPE_CANDIDATES = ['doujinshi,manga,manhwa,manhua', 'doujinshi,manga,manhwa', 'doujinshi,manga'];
+let _typeIdx = -1;
 
 const DEVICE_ID = 'dev_' + Math.random().toString(36).substring(2, 13) + '_' + Date.now().toString(36);
 
@@ -109,9 +114,26 @@ var KonmikExtension = {
         page = page || 1;
         const q = query && query.trim().length > 0 ? encodeURIComponent(query.trim()) : '';
         const offset = (page - 1) * 24;
-        const path = '/api/manga?search=' + q + '&genre=&status=&type=doujinshi,manga&sort=latest_chapter&limit=24&offset=' + offset;
-        const data = await apiGet(path);
-        const items = Array.isArray(data) ? data : ((data && data.data) || []);
+        const base = '/api/manga?search=' + q + '&genre=&status=';
+        const tail = '&sort=latest_chapter&limit=24&offset=' + offset;
+        const order = [];
+        if (_typeIdx >= 0) order.push(_typeIdx);
+        for (let i = 0; i < TYPE_CANDIDATES.length; i++) if (i !== _typeIdx) order.push(i);
+
+        let items = [];
+        let lastErr = null;
+        for (const i of order) {
+            try {
+                const data = await apiGet(base + '&type=' + TYPE_CANDIDATES[i] + tail);
+                const arr = Array.isArray(data) ? data : ((data && data.data) || []);
+                if (arr.length > 0 || page > 1) {
+                    items = arr;
+                    _typeIdx = i;
+                    break;
+                }
+            } catch (e) { lastErr = e; }
+        }
+        if (items.length === 0 && lastErr && page === 1) throw lastErr;
 
         const list = [];
         for (const it of items) {
