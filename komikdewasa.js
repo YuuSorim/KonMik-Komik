@@ -1,7 +1,7 @@
 // ID: ext_komikdewasa
 // NAME: Komikdewasa
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.0.1
 // COLOR: #E53935
 // ICON: https://www.google.com/s2/favicons?domain=komikdewasa.art&sz=64
 // REFERER: https://komikdewasa.art/
@@ -14,8 +14,12 @@ const HEADERS = {
 
 async function fetchHtml(url) {
     const res = await fetch(url, { headers: HEADERS });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.text();
+    const body = await res.text();
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' pada ' + url + ' | ' + body.substring(0, 120).replace(/\s+/g, ' '));
+    if (/Just a moment|cf-chl|challenge-platform|Attention Required/i.test(body.substring(0, 3000))) {
+        throw new Error('Diblokir Cloudflare (halaman tantangan) pada ' + url);
+    }
+    return body;
 }
 
 function clean(str) {
@@ -132,7 +136,11 @@ var KonmikExtension = {
             }
         }
 
-        return { manga_list: parseCards(html) };
+        const cards = parseCards(html);
+        if (cards.length === 0 && page === 1) {
+            throw new Error('Tidak ada kartu terbaca. Panjang HTML=' + html.length + ' | awal: ' + html.substring(0, 120).replace(/\s+/g, ' '));
+        }
+        return { manga_list: cards };
     },
 
     async getDetail(url) {
