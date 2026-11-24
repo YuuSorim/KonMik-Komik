@@ -1,23 +1,31 @@
 // ID: ext_komikdewasa
 // NAME: Komikdewasa
 // TYPE: comic
-// VERSION: 1.0.1
+// VERSION: 1.0.2
 // COLOR: #E53935
 // ICON: https://www.google.com/s2/favicons?domain=komikdewasa.art&sz=64
 // REFERER: https://komikdewasa.art/
 
 const BASE = 'https://komikdewasa.art';
+
+// OPSIONAL: isi jika situs menampilkan tantangan Cloudflare.
+// Salin nilai cookie "cf_clearance" dan User-Agent dari browser yang sama.
+// Cookie terikat ke IP dan User-Agent, jadi tiap pengguna perlu mengisi sendiri.
+const COOKIE = '';       // contoh: 'cf_clearance=abc123...'
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
 const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    'User-Agent': USER_AGENT,
     'Referer': BASE + '/',
 };
+if (COOKIE) HEADERS['Cookie'] = COOKIE;
 
 async function fetchHtml(url) {
     const res = await fetch(url, { headers: HEADERS });
     const body = await res.text();
     if (!res.ok) throw new Error('HTTP ' + res.status + ' pada ' + url + ' | ' + body.substring(0, 120).replace(/\s+/g, ' '));
     if (/Just a moment|cf-chl|challenge-platform|Attention Required/i.test(body.substring(0, 3000))) {
-        throw new Error('Diblokir Cloudflare (halaman tantangan) pada ' + url);
+        throw new Error('Diblokir Cloudflare pada ' + url + (COOKIE ? ' (cookie kedaluwarsa atau User-Agent tidak cocok)' : ' (isi COOKIE dan USER_AGENT di bagian atas file ekstensi)'));
     }
     return body;
 }
