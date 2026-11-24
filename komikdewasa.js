@@ -1,7 +1,7 @@
 // ID: ext_komikdewasa
 // NAME: Komik Dewasa (ID)
 // TYPE: comic
-// VERSION: 1.0.2
+// VERSION: 1.1.0
 // COLOR: #365FAF
 // ICON: https://i3.wp.com/komikdewasa.art/wp-content/uploads/2022/05/cropped-Screenshot_20220509_010230_1-32x32.jpg
 // REFERER: https://komikdewasa.art/
@@ -11,14 +11,27 @@
 
 const BASE = 'https://komikdewasa.art';
 
+// ---------------------------------------------------------------------------
+// OPSIONAL - kalau situs menampilkan "Just a moment..." (tantangan Cloudflare) di app:
+// buka komikdewasa.art di Chrome laptop sampai terbuka normal, lalu
+//   1) F12 > Application > Cookies > https://komikdewasa.art > salin nilai "cf_clearance"
+//   2) F12 > Console > ketik: navigator.userAgent  > salin hasilnya
+// dan tempel di bawah. Cookie ini terikat ke jaringan (IP) dan User-Agent browser itu,
+// dan akan kedaluwarsa (ulangi langkah di atas kalau katalog kosong lagi).
+// Belum tentu berhasil: Cloudflare bisa menolaknya untuk klien non-browser.
+const CF_CLEARANCE = '';   // contoh: 'AbCdEf123...-1700000000-1.2.1.1-xyz'
+const BROWSER_UA = '';     // contoh: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... Chrome/130.0.0.0 Safari/537.36'
+// ---------------------------------------------------------------------------
+
 const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    'User-Agent': BROWSER_UA || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     'Referer': BASE + '/',
 };
+if (CF_CLEARANCE) headers['Cookie'] = 'cf_clearance=' + CF_CLEARANCE.replace(/^cf_clearance=/, '');
 
 async function fetchHtml(url) {
     const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error('HTTP ' + res.status + ' - ' + url);
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' - ' + url + (res.status === 403 || res.status === 503 ? ' (kemungkinan tantangan Cloudflare; lihat bagian OPSIONAL di atas file)' : ''));
     return await res.text();
 }
 
@@ -90,6 +103,10 @@ function parseCards(html) {
 
 // Kalau tidak ada kartu sama sekali, tampilkan petunjuk isi halaman supaya mudah dilacak
 function emptyError(html, url) {
+    if (/Just a moment|Checking your browser|cf-browser-verification|challenge-platform/i.test(html)) {
+        return new Error('Situs memakai tantangan Cloudflare dan memblokir app (halaman "Just a moment..."). ' +
+            'Lihat bagian OPSIONAL di atas file komikdewasa.js untuk memakai cf_clearance dari browser.');
+    }
     const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     const body = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
     return new Error('Tidak ada kartu komik. URL: ' + url + ' | panjang ' + html.length +
