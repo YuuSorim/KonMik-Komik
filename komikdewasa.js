@@ -11,8 +11,8 @@ const BASE = 'https://komikdewasa.art';
 // OPSIONAL: isi jika situs menampilkan tantangan Cloudflare.
 // Salin nilai cookie "cf_clearance" dan User-Agent dari browser yang sama.
 // Cookie terikat ke IP dan User-Agent, jadi tiap pengguna perlu mengisi sendiri.
-const COOKIE = '';       // contoh: 'cf_clearance=abc123...'
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const COOKIE = 'cf_clearance=Clx_HMql0kvCpMytj6aIF3sOTnvSTf072RrXQfZos_hFsYHHMjRBKJpQcoPTkTgphS3RmlFcH8dbniwqVjVDl5BqIA1uy3yt3wRLfu0zludrgPGch5HVopD3AxmHziiUoX1ZKIjLUSLBUY6EsZhuhHzbxLGT3G23F5Xc9sOcH5P7IXkjq5aBarLRnSmHPLtdoE-GEBsqz8oa_CJ4M6SFhKZ_zrIJIjDaIfSe3lTqFaD-0BaLRPJ46BGrvJoDhgGnU3Enzz3l3PZmM_c9amS2MGknnc1oxrydwQ7uXekvmiZlZfdJqzXfk3-g9HIRJVvlyZGwuFxu0g4UnCwXsL4MIdTf14WkVIcJWaW8zNoh9HmC6lamTOrbHGbzQtU1KGfuijmptOKYgIuyzzXORj8kOlQ';       // contoh: 'cf_clearance=abc123...'
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36';
 
 const HEADERS = {
     'User-Agent': USER_AGENT,
