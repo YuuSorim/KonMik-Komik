@@ -1,7 +1,7 @@
 // ID: ext_komikdewasa
 // NAME: Komik Dewasa (ID)
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.0.2
 // COLOR: #365FAF
 // ICON: https://i3.wp.com/komikdewasa.art/wp-content/uploads/2022/05/cropped-Screenshot_20220509_010230_1-32x32.jpg
 // REFERER: https://komikdewasa.art/
@@ -52,30 +52,60 @@ function section(html, startMark, endMark) {
     return html.slice(s, e);
 }
 
+function attr(tag, name) {
+    const m = tag.match(new RegExp('\\s' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')', 'i'));
+    return m ? (m[1] !== undefined ? m[1] : m[2]) : '';
+}
+
 function parseCards(html) {
-    const re = /<div class="bsx">\s*<a href="([^"]+)"\s+title="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
     const out = [];
     const seen = {};
-    let m;
-    while ((m = re.exec(html)) !== null) {
-        const url = m[1];
-        if (seen[url]) continue;
+    const parts = html.split('<div class="bsx">');
+    for (let i = 1; i < parts.length; i++) {
+        const block = parts[i];
+        const aTag = block.match(/<a\s[^>]*>/);
+        if (!aTag) continue;
+        const url = attr(aTag[0], 'href');
+        if (!url || seen[url]) continue;
         seen[url] = true;
-        const inner = m[3];
-        const img = inner.match(/<img[^>]+src="([^"]+)"/);
-        const ch = inner.match(/<div class="epxs">([^<]*)<\/div>/);
-        const sc = inner.match(/<div class="numscore">([^<]*)<\/div>/);
-        const tt = inner.match(/<div class="tt">([\s\S]*?)<\/div>/);
+        const imgTag = block.match(/<img\s[^>]*>/);
+        let src = '';
+        if (imgTag) {
+            src = attr(imgTag[0], 'data-src') || attr(imgTag[0], 'data-lazy-src') || attr(imgTag[0], 'src');
+        }
+        const ch = block.match(/<div class="epxs">([\s\S]*?)<\/div>/);
+        const sc = block.match(/<div class="numscore">([\s\S]*?)<\/div>/);
+        const tt = block.match(/<div class="tt">([\s\S]*?)<\/div>/);
         out.push({
             id: url,
-            title: decode(tt ? tt[1] : m[2]) || decode(m[2]),
-            cover_url: cleanCover(img ? img[1] : ''),
+            title: decode(tt ? tt[1] : '') || decode(attr(aTag[0], 'title')),
+            cover_url: cleanCover(src),
             latest_chapter: ch ? decode(ch[1]) : '',
             rating: sc ? decode(sc[1]) : '-',
             views: '-',
         });
     }
     return out;
+}
+
+// Kalau tidak ada kartu sama sekali, tampilkan petunjuk isi halaman supaya mudah dilacak
+function emptyError(html, url) {
+    const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const body = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+    return new Error('Tidak ada kartu komik. URL: ' + url + ' | panjang ' + html.length +
+        ' | title: ' + (t ? decode(t[1]).slice(0, 80) : '-') + ' | isi: ' + decode(body).slice(0, 120));
+}
+
+// Ambil kartu dari satu bagian halaman; kalau kosong, coba seluruh halaman
+function cardsFrom(html, startMark, endMark) {
+    let cards = parseCards(section(html, startMark, endMark));
+    if (!cards.length) cards = parseCards(html);
+    return cards;
+}
+
+// Buang gambar iklan / watermark situs yang bukan halaman komik
+function isPage(u) {
+    return !/IKLAN|WM-KOMIK-DEWASA|\/bkp-/i.test(u);
 }
 
 var KonmikExtension = {
@@ -88,7 +118,9 @@ var KonmikExtension = {
         if (q) {
             const url = (page > 1 ? BASE + '/page/' + page + '/' : BASE + '/') + '?s=' + encodeURIComponent(q);
             const html = await fetchHtml(url);
-            return { manga_list: parseCards(section(html, 'class="listupd"', 'class="pagination"')) };
+            const cards = cardsFrom(html, 'class="listupd"', 'class="pagination"');
+            if (!cards.length && page === 1 && html.indexOf('class="bsx"') < 0 && html.indexOf('Nothing Found') < 0) throw emptyError(html, url);
+            return { manga_list: cards };
         }
 
         // Genre (opsional): filters.genre = 'doujinshi'
@@ -96,22 +128,24 @@ var KonmikExtension = {
             const g = String(filters.genre).trim();
             const url = BASE + '/genres/' + encodeURIComponent(g) + '/' + (page > 1 ? 'page/' + page + '/' : '');
             const html = await fetchHtml(url);
-            return { manga_list: parseCards(section(html, 'class="listupd"', 'class="pagination"')) };
+            return { manga_list: cardsFrom(html, 'class="listupd"', 'class="pagination"') };
         }
 
         // Populer: arsip /komik/?order=popular (kalau gagal, jatuh ke Latest Update)
         if (sort === 'popular') {
             try {
-                const html = await fetchHtml(BASE + '/komik/?page=' + page + '&order=popular');
-                const cards = parseCards(section(html, 'class="listupd"', 'class="pagination"'));
+                const html = await fetchHtml(BASE + '/komik/?order=popular&page=' + page);
+                const cards = cardsFrom(html, 'class="listupd"', 'class="pagination"');
                 if (cards.length) return { manga_list: cards };
             } catch (e) { /* lanjut ke latest */ }
         }
 
         // Latest Update dari beranda (/page/N/)
-        const html = await fetchHtml(page > 1 ? BASE + '/page/' + page + '/' : BASE + '/');
-        const latest = section(html, '<h2>Latest Update</h2>', 'class="pagination"');
-        return { manga_list: parseCards(latest) };
+        const homeUrl = page > 1 ? BASE + '/page/' + page + '/' : BASE + '/';
+        const html = await fetchHtml(homeUrl);
+        const cards = cardsFrom(html, 'Latest Update', 'class="pagination"');
+        if (!cards.length && page === 1) throw emptyError(html, homeUrl);
+        return { manga_list: cards };
     },
 
     async getDetail(slug) {
@@ -159,6 +193,14 @@ var KonmikExtension = {
             });
         }
 
+        // Situs ini mengurutkan chapter dari yang terlama; KonMik menampilkan yang terbaru di atas
+        if (chapters.length > 1) {
+            const num = c => { const m = String(c.title).match(/(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : null; };
+            const a = num(chapters[0]);
+            const b = num(chapters[chapters.length - 1]);
+            if (a !== null && b !== null && a < b) chapters.reverse();
+        }
+
         return {
             title: title,
             cover_url: cover,
@@ -202,7 +244,7 @@ var KonmikExtension = {
                     let m;
                     while ((m = re.exec(body)) !== null) {
                         const u = m[1].replace(/\\\//g, '/').replace(/\\u0026/g, '&');
-                        if (/^https?:\/\//.test(u)) images.push(u);
+                        if (/^https?:\/\//.test(u) && isPage(u)) images.push(u);
                     }
                 }
             }
@@ -213,7 +255,7 @@ var KonmikExtension = {
         const area = section(html, 'id="readerarea"', 'class="chnav');
         const ire = /<img[^>]+src="(https?:\/\/[^"]+)"/g;
         let im;
-        while ((im = ire.exec(area)) !== null) images.push(im[1]);
+        while ((im = ire.exec(area)) !== null) { if (isPage(im[1])) images.push(im[1]); }
         return images;
     },
 };
