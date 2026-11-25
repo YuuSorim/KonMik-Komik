@@ -1,7 +1,7 @@
 // ID: ext_webkomikdewasa
 // NAME: WebKomikDewasa (ID)
 // TYPE: comic
-// VERSION: 1.0.0
+// VERSION: 1.0.1
 // COLOR: #1977FC
 // ICON: https://i0.wp.com/webkomikdewasa.top/wp-content/uploads/2025/04/cropped-Untitled-1-copy-1-270x270.png
 // REFERER: https://webkomikdewasa.top/
@@ -10,10 +10,12 @@ const BASE = 'https://webkomikdewasa.top';
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     'Referer': BASE + '/',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
 };
 
 // Gambar yang bukan halaman komik (banner, header/footer chapter, dll.)
-const IMAGE_BLACKLIST = /webkomikdewasa-atas|webkomikdewasa-bawah|readerarea\.svg|btn_close|banner-iklan|Betcoin|histats|yandex/i;
+const IMAGE_BLACKLIST = /webkomikdewasa-atas|webkomikdewasa-bawah|WM-KOMIK-DEWASA|readerarea\.svg|btn_close|banner-iklan|Betcoin|histats|yandex/i;
 
 async function fetchHtml(url) {
     const res = await fetch(url, { headers: HEADERS });
@@ -233,32 +235,33 @@ var KonmikExtension = {
             images.push(u);
         };
 
-        // 1) Area baca: semua <img> di dalam #readerarea
-        const start = html.search(/id=["']readerarea["']/i);
-        if (start !== -1) {
-            let end = html.indexOf('<div class="chnav', start + 1);
-            if (end === -1) end = html.search(/<\/article>/i);
-            if (end === -1 || end < start) end = html.length;
-            const area = html.substring(start, end);
-            const imgRegex = /<img\b[^>]*>/gi;
-            let im;
-            while ((im = imgRegex.exec(area)) !== null) {
-                push(imgFromTag(im[0]));
+        // 1) JSON ts_reader.run({... "images":["...","..."] ...}) -> paling bersih
+        const jsonMatch = html.match(/"images"\s*:\s*(\[[^\]]*\])/);
+        if (jsonMatch) {
+            try {
+                JSON.parse(jsonMatch[1]).forEach(function (u) { push(absUrl(u)); });
+            } catch (e) { /* lanjut ke cara 2 */ }
+        }
+
+        // 2) Fallback: semua <img> di dalam #readerarea
+        if (images.length === 0) {
+            const start = html.search(/id=["']readerarea["']/i);
+            if (start !== -1) {
+                let end = html.indexOf('<div class="kln"', start + 1);
+                if (end === -1) end = html.length;
+                const area = html.substring(start, end);
+                const imgRegex = /<img\b[^>]*>/gi;
+                let im;
+                while ((im = imgRegex.exec(area)) !== null) {
+                    push(imgFromTag(im[0]));
+                }
             }
         }
 
-        // 2) Fallback: JSON dari ts_reader ("images":["...","..."])
         if (images.length === 0) {
-            const jsonMatch = html.match(/"images"\s*:\s*(\[[^\]]*\])/);
-            if (jsonMatch) {
-                try {
-                    JSON.parse(jsonMatch[1]).forEach(function (u) { push(absUrl(u)); });
-                } catch (e) { /* abaikan */ }
-            }
-        }
-
-        if (images.length === 0) {
-            throw new Error('Chapter ini tidak punya gambar (kemungkinan hanya tautan unduhan PDF).');
+            // Pesan diagnostik supaya mudah dilacak dari sisi aplikasi
+            const snippet = html.substring(0, 120).replace(/\s+/g, ' ');
+            throw new Error('Gambar chapter tidak ditemukan (panjang HTML ' + html.length + '): ' + snippet);
         }
         return images;
     }
