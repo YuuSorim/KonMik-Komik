@@ -1,7 +1,7 @@
-// ID: ext_webkomikdewasa
-// NAME: WebKomikDewasa (ID)
+// ID: ext_webkomikdewasa_test
+// NAME: WebKomikDewasa TES
 // TYPE: comic
-// VERSION: 1.0.1
+// VERSION: 0.0.1
 // COLOR: #1977FC
 // ICON: https://i0.wp.com/webkomikdewasa.top/wp-content/uploads/2025/04/cropped-Untitled-1-copy-1-270x270.png
 // REFERER: https://webkomikdewasa.top/
@@ -226,43 +226,11 @@ var KonmikExtension = {
     },
 
     async getChapterImages(endpoint) {
-        const html = await fetchHtml(absUrl(endpoint));
-        const images = [];
-        const seen = {};
-        const push = function (u) {
-            if (!u || seen[u] || IMAGE_BLACKLIST.test(u)) return;
-            seen[u] = true;
-            images.push(u);
-        };
-
-        // 1) JSON ts_reader.run({... "images":["...","..."] ...}) -> paling bersih
-        const jsonMatch = html.match(/"images"\s*:\s*(\[[^\]]*\])/);
-        if (jsonMatch) {
-            try {
-                JSON.parse(jsonMatch[1]).forEach(function (u) { push(absUrl(u)); });
-            } catch (e) { /* lanjut ke cara 2 */ }
-        }
-
-        // 2) Fallback: semua <img> di dalam #readerarea
-        if (images.length === 0) {
-            const start = html.search(/id=["']readerarea["']/i);
-            if (start !== -1) {
-                let end = html.indexOf('<div class="kln"', start + 1);
-                if (end === -1) end = html.length;
-                const area = html.substring(start, end);
-                const imgRegex = /<img\b[^>]*>/gi;
-                let im;
-                while ((im = imgRegex.exec(area)) !== null) {
-                    push(imgFromTag(im[0]));
-                }
-            }
-        }
-
-        if (images.length === 0) {
-            // Pesan diagnostik supaya mudah dilacak dari sisi aplikasi
-            const snippet = html.substring(0, 120).replace(/\s+/g, ' ');
-            throw new Error('Gambar chapter tidak ditemukan (panjang HTML ' + html.length + '): ' + snippet);
-        }
-        return images;
+        // VERSI TES: tidak memuat situs, hanya mengembalikan 3 gambar contoh
+        return [
+            'https://placehold.co/800x1200/png?text=Halaman+1',
+            'https://placehold.co/800x1200/png?text=Halaman+2',
+            'https://placehold.co/800x1200/png?text=Halaman+3'
+        ];
     }
 };
