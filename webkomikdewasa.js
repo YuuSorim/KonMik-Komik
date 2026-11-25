@@ -1,7 +1,7 @@
-// ID: ext_webkomikdewasa_test
-// NAME: WebKomikDewasa TES
+// ID: ext_webkomikdewasa
+// NAME: WebKomikDewasa (ID)
 // TYPE: comic
-// VERSION: 0.0.2
+// VERSION: 1.0.2
 // COLOR: #1977FC
 // ICON: https://i0.wp.com/webkomikdewasa.top/wp-content/uploads/2025/04/cropped-Untitled-1-copy-1-270x270.png
 // REFERER: https://webkomikdewasa.top/
@@ -225,7 +225,7 @@ var KonmikExtension = {
         };
     },
 
-    async _real(endpoint) {
+    async _fromHtml(endpoint) {
         const html = await fetchHtml(absUrl(endpoint));
         const images = [];
         const seen = {};
@@ -266,30 +266,34 @@ var KonmikExtension = {
         return images;
     },
 
+    // Jalur utama: REST API WordPress (ringan, hanya isi chapter)
     async getChapterImages(endpoint) {
-        // VERSI DIAGNOSTIK: hasil ditampilkan sebagai teks di halaman placeholder
-        const mk = function (lines) {
-            return 'https://placehold.co/800x500/png?text=' + encodeURIComponent(lines.join('\n'));
-        };
-        const cut = function (t, n) { return String(t).replace(/\s+/g, ' ').substring(0, n); };
-        const pages = [];
-        pages.push(mk(['1) tipe: ' + typeof endpoint, cut(endpoint, 45), cut(String(endpoint).substring(45), 45)]));
+        const url = absUrl(String(endpoint));
+        const slug = url.split('#')[0].split('?')[0].replace(/\/+$/, '').split('/').pop();
+
         try {
-            const res = await fetch(absUrl(String(endpoint)), { headers: HEADERS });
-            const html = await res.text();
-            pages.push(mk(['2) HTTP ' + res.status, 'panjang HTML: ' + html.length, cut(html, 45)]));
-            const hasReader = html.search(/id=["']readerarea["']/i) !== -1;
-            const hasJson = /"images"\s*:\s*\[/.test(html);
-            pages.push(mk(['3) readerarea: ' + hasReader, 'json images: ' + hasJson, 'warungkomikcdn: ' + (html.indexOf('warungkomikcdn') !== -1)]));
-            try {
-                const imgs = await KonmikExtension._real(endpoint);
-                pages.push(mk(['4) parser OK', 'jumlah gambar: ' + imgs.length, cut(imgs[0], 45)]));
-            } catch (e2) {
-                pages.push(mk(['4) parser ERROR', cut(e2 && e2.message, 90)]));
+            const apiUrl = BASE + '/wp-json/wp/v2/posts?slug=' + encodeURIComponent(slug) + '&_fields=id,content';
+            const res = await fetch(apiUrl, { headers: HEADERS });
+            if (res.ok) {
+                const data = JSON.parse(await res.text());
+                const rendered = data && data[0] && data[0].content && data[0].content.rendered;
+                if (rendered) {
+                    const images = [];
+                    const seen = {};
+                    const imgRegex = /<img\b[^>]*>/gi;
+                    let im;
+                    while ((im = imgRegex.exec(rendered)) !== null) {
+                        const u = imgFromTag(im[0]);
+                        if (!u || seen[u] || IMAGE_BLACKLIST.test(u)) continue;
+                        seen[u] = true;
+                        images.push(u);
+                    }
+                    if (images.length > 0) return images;
+                }
             }
-        } catch (e) {
-            pages.push(mk(['2) FETCH ERROR', cut(e && e.message, 90)]));
-        }
-        return pages;
+        } catch (e) { /* lanjut ke cara cadangan */ }
+
+        // Cadangan: parsing halaman chapter penuh
+        return await KonmikExtension._fromHtml(endpoint);
     }
 };
