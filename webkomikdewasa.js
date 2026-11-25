@@ -1,7 +1,7 @@
 // ID: ext_webkomikdewasa
 // NAME: WebKomikDewasa (ID)
 // TYPE: comic
-// VERSION: 1.0.2
+// VERSION: 1.0.3
 // COLOR: #1977FC
 // ICON: https://i0.wp.com/webkomikdewasa.top/wp-content/uploads/2025/04/cropped-Untitled-1-copy-1-270x270.png
 // REFERER: https://webkomikdewasa.top/
@@ -266,32 +266,41 @@ var KonmikExtension = {
         return images;
     },
 
-    // Jalur utama: REST API WordPress (ringan, hanya isi chapter)
+    // Jalur utama: REST API WordPress (ringan, hanya isi chapter).
+    // JSON.parse sengaja TIDAK dipakai: teks dari bridge aplikasi bisa tidak valid sebagai JSON,
+    // jadi URL gambar diambil langsung dari teks mentah (tahan terhadap \/ dan \").
     async getChapterImages(endpoint) {
         const url = absUrl(String(endpoint));
         const slug = url.split('#')[0].split('?')[0].replace(/\/+$/, '').split('/').pop();
 
+        let raw = '';
         try {
             const apiUrl = BASE + '/wp-json/wp/v2/posts?slug=' + encodeURIComponent(slug) + '&_fields=id,content';
             const res = await fetch(apiUrl, { headers: HEADERS });
-            if (res.ok) {
-                const data = JSON.parse(await res.text());
-                const rendered = data && data[0] && data[0].content && data[0].content.rendered;
-                if (rendered) {
-                    const images = [];
-                    const seen = {};
-                    const imgRegex = /<img\b[^>]*>/gi;
-                    let im;
-                    while ((im = imgRegex.exec(rendered)) !== null) {
-                        const u = imgFromTag(im[0]);
-                        if (!u || seen[u] || IMAGE_BLACKLIST.test(u)) continue;
-                        seen[u] = true;
-                        images.push(u);
-                    }
-                    if (images.length > 0) return images;
+            if (res.ok) raw = await res.text();
+        } catch (e) { raw = ''; }
+
+        if (raw && raw.indexOf('"rendered"') !== -1) {
+            const images = [];
+            const seen = {};
+            const tagRegex = /<img\b[\s\S]*?>/gi;
+            const attrNames = ['data-lazy-src', 'data-src', 'src'];
+            let tm;
+            while ((tm = tagRegex.exec(raw)) !== null) {
+                let found = '';
+                for (const n of attrNames) {
+                    const m = tm[0].match(new RegExp(n + '\\s*=\\s*\\\\*["\']\\s*(https?:[^"\'\\s]+?)\\\\*["\']', 'i'));
+                    if (m) { found = m[1]; break; }
                 }
+                if (!found) continue;
+                const u = found.replace(/\\\//g, '/').replace(/\\/g, '');
+                if (seen[u] || IMAGE_BLACKLIST.test(u)) continue;
+                seen[u] = true;
+                images.push(u);
             }
-        } catch (e) { /* lanjut ke cara cadangan */ }
+            if (images.length > 0) return images;
+            throw new Error('Chapter ini tidak punya gambar (kemungkinan hanya tautan unduhan PDF).');
+        }
 
         // Cadangan: parsing halaman chapter penuh
         return await KonmikExtension._fromHtml(endpoint);
