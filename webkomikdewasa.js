@@ -1,7 +1,7 @@
 // ID: ext_webkomikdewasa_test
 // NAME: WebKomikDewasa TES
 // TYPE: comic
-// VERSION: 0.0.1
+// VERSION: 0.0.2
 // COLOR: #1977FC
 // ICON: https://i0.wp.com/webkomikdewasa.top/wp-content/uploads/2025/04/cropped-Untitled-1-copy-1-270x270.png
 // REFERER: https://webkomikdewasa.top/
@@ -225,12 +225,71 @@ var KonmikExtension = {
         };
     },
 
+    async _real(endpoint) {
+        const html = await fetchHtml(absUrl(endpoint));
+        const images = [];
+        const seen = {};
+        const push = function (u) {
+            if (!u || seen[u] || IMAGE_BLACKLIST.test(u)) return;
+            seen[u] = true;
+            images.push(u);
+        };
+
+        // 1) JSON ts_reader.run({... "images":["...","..."] ...}) -> paling bersih
+        const jsonMatch = html.match(/"images"\s*:\s*(\[[^\]]*\])/);
+        if (jsonMatch) {
+            try {
+                JSON.parse(jsonMatch[1]).forEach(function (u) { push(absUrl(u)); });
+            } catch (e) { /* lanjut ke cara 2 */ }
+        }
+
+        // 2) Fallback: semua <img> di dalam #readerarea
+        if (images.length === 0) {
+            const start = html.search(/id=["']readerarea["']/i);
+            if (start !== -1) {
+                let end = html.indexOf('<div class="kln"', start + 1);
+                if (end === -1) end = html.length;
+                const area = html.substring(start, end);
+                const imgRegex = /<img\b[^>]*>/gi;
+                let im;
+                while ((im = imgRegex.exec(area)) !== null) {
+                    push(imgFromTag(im[0]));
+                }
+            }
+        }
+
+        if (images.length === 0) {
+            // Pesan diagnostik supaya mudah dilacak dari sisi aplikasi
+            const snippet = html.substring(0, 120).replace(/\s+/g, ' ');
+            throw new Error('Gambar chapter tidak ditemukan (panjang HTML ' + html.length + '): ' + snippet);
+        }
+        return images;
+    },
+
     async getChapterImages(endpoint) {
-        // VERSI TES: tidak memuat situs, hanya mengembalikan 3 gambar contoh
-        return [
-            'https://placehold.co/800x1200/png?text=Halaman+1',
-            'https://placehold.co/800x1200/png?text=Halaman+2',
-            'https://placehold.co/800x1200/png?text=Halaman+3'
-        ];
+        // VERSI DIAGNOSTIK: hasil ditampilkan sebagai teks di halaman placeholder
+        const mk = function (lines) {
+            return 'https://placehold.co/800x500/png?text=' + encodeURIComponent(lines.join('\n'));
+        };
+        const cut = function (t, n) { return String(t).replace(/\s+/g, ' ').substring(0, n); };
+        const pages = [];
+        pages.push(mk(['1) tipe: ' + typeof endpoint, cut(endpoint, 45), cut(String(endpoint).substring(45), 45)]));
+        try {
+            const res = await fetch(absUrl(String(endpoint)), { headers: HEADERS });
+            const html = await res.text();
+            pages.push(mk(['2) HTTP ' + res.status, 'panjang HTML: ' + html.length, cut(html, 45)]));
+            const hasReader = html.search(/id=["']readerarea["']/i) !== -1;
+            const hasJson = /"images"\s*:\s*\[/.test(html);
+            pages.push(mk(['3) readerarea: ' + hasReader, 'json images: ' + hasJson, 'warungkomikcdn: ' + (html.indexOf('warungkomikcdn') !== -1)]));
+            try {
+                const imgs = await KonmikExtension._real(endpoint);
+                pages.push(mk(['4) parser OK', 'jumlah gambar: ' + imgs.length, cut(imgs[0], 45)]));
+            } catch (e2) {
+                pages.push(mk(['4) parser ERROR', cut(e2 && e2.message, 90)]));
+            }
+        } catch (e) {
+            pages.push(mk(['2) FETCH ERROR', cut(e && e.message, 90)]));
+        }
+        return pages;
     }
 };
